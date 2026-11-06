@@ -10,6 +10,7 @@ drop-in for the parquet readers.
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -32,13 +33,25 @@ def enabled() -> bool:
     return bool(os.getenv("DATABASE_URL"))
 
 
+@lru_cache(maxsize=1)
 def _engine():
+    # One cached engine per process. Building a fresh engine per call gave each
+    # call its own pool, so a single concurrent dashboard load (4 zones x 3
+    # reads) opened ~12 server sessions and hit Supabase's session-mode pooler
+    # cap (max 15 clients) -> EMAXCONNSESSION 500s. A small bounded pool keeps
+    # concurrent server sessions well under that cap.
     from sqlalchemy import create_engine
 
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL not set")
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(
+        url,
+        pool_size=3,
+        max_overflow=2,  # <= 5 server sessions, safe headroom under the 15 cap
+        pool_pre_ping=True,
+        pool_recycle=1800,  # drop idle conns the pooler would reap
+    )
 
 
 def upsert(df: pd.DataFrame, table: str) -> int:

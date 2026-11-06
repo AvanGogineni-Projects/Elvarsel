@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from elvarsel import config
+from elvarsel import config, storage
 
 PRICE_LAGS: tuple[int, ...] = (24, 48, 168)
 LOAD_LAGS: tuple[int, ...] = (24, 48, 168)
@@ -36,14 +36,20 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
 # ---- loaders (read the raw parquet store) --------------------------------
 
 def load_prices(zone: str) -> pd.DataFrame:
+    if storage.enabled():
+        return storage.read_zone("raw_price", zone)
     return _read("elpris", zone, ["time_start", "eur_per_kwh"])
 
 
 def load_entsoe(zone: str) -> pd.DataFrame:
+    if storage.enabled():
+        return storage.read_zone("raw_entsoe", zone)
     return _read("entsoe", zone, ["time_start", "metric", "value"])
 
 
 def load_weather(zone: str) -> pd.DataFrame:
+    if storage.enabled():
+        return storage.read_zone("raw_weather", zone)
     return _read("smhi", zone, ["time", "reference_time", *WEATHER_FIELDS])
 
 

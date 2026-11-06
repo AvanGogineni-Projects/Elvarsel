@@ -12,6 +12,9 @@ from __future__ import annotations
 import os
 
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TABLES: dict[str, list[str]] = {
     "raw_price": ["zone", "time_start", "time_end", "sek_per_kwh", "eur_per_kwh", "exr"],

@@ -45,7 +45,14 @@ def fetch(zone: str, day: dt.date) -> pd.DataFrame:
         _long(price, zone, "day_ahead_price_eur_mwh"),
         _long(load.iloc[:, 0] if isinstance(load, pd.DataFrame) else load, zone, "load_mw"),
     ]
-    return pd.concat(frames, ignore_index=True)
+    return _trim(pd.concat(frames, ignore_index=True), end.tz_convert("UTC"))
+
+
+def _trim(df: pd.DataFrame, end_utc: pd.Timestamp) -> pd.DataFrame:
+    """Drop the inclusive end-boundary row entsoe-py returns, keep one row per
+    (metric, time) so a day has no duplicated midnight point."""
+    df = df[df["time_start"] < end_utc]
+    return df.drop_duplicates(["metric", "time_start"]).reset_index(drop=True)
 
 
 def _long(series: pd.Series, zone: str, metric: str) -> pd.DataFrame:

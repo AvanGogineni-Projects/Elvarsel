@@ -221,3 +221,7 @@ __marimo__/
 
 # Elvarsel raw/processed data store
 data/
+
+# MLflow local tracking
+mlruns/
+mlflow.db

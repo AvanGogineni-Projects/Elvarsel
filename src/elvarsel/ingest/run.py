@@ -39,7 +39,7 @@ def ingest_day(source: str, zone: str, day: dt.date) -> tuple[int, str | None]:
             df = entsoe_client.fetch(zone, day)
     except entsoe_client.MissingToken as e:
         return 0, f"skipped entsoe: {e}"
-    except Exception as e:  # keep one bad day from crashing the run
+    except Exception as e:  # noqa: BLE001 - one bad day must not crash the whole run
         return 0, f"{type(e).__name__}: {e}"
     if df.empty:
         return 0, "no data"

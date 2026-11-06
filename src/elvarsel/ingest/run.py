@@ -13,7 +13,7 @@ import datetime as dt
 import pandas as pd
 
 from elvarsel import config
-from elvarsel.ingest import elpris, entsoe_client
+from elvarsel.ingest import elpris, entsoe_client, smhi
 
 
 def _daterange(start: dt.date, end: dt.date):
@@ -35,6 +35,11 @@ def ingest_day(source: str, zone: str, day: dt.date) -> tuple[int, str | None]:
     try:
         if source == "elpris":
             df = elpris.fetch(zone, day)
+        elif source == "smhi":
+            # Forecast snapshot: ignores `day`, tagged under its own reference date.
+            df = smhi.fetch(zone)
+            if not df.empty:
+                day = df["reference_time"].iloc[0].date()
         else:
             df = entsoe_client.fetch(zone, day)
     except entsoe_client.MissingToken as e:
@@ -50,19 +55,24 @@ def ingest_day(source: str, zone: str, day: dt.date) -> tuple[int, str | None]:
 def main(argv: list[str] | None = None) -> int:
     today = dt.date.today()
     p = argparse.ArgumentParser(prog="elvarsel.ingest.run")
-    p.add_argument("--source", choices=["elpris", "entsoe", "both"], default="both")
+    p.add_argument(
+        "--source", choices=["elpris", "entsoe", "smhi", "both", "all"], default="both"
+    )
     p.add_argument("--zones", nargs="+", default=list(config.ZONES), choices=list(config.ZONES))
     p.add_argument("--start", type=dt.date.fromisoformat, default=today - dt.timedelta(days=1))
     p.add_argument("--end", type=dt.date.fromisoformat, default=None)
     args = p.parse_args(argv)
 
     end = args.end or args.start
-    sources = ["elpris", "entsoe"] if args.source == "both" else [args.source]
+    src_map = {"both": ["elpris", "entsoe"], "all": ["elpris", "entsoe", "smhi"]}
+    sources = src_map.get(args.source, [args.source])
 
     total = 0
     for source in sources:
         for zone in args.zones:
-            for day in _daterange(args.start, end):
+            # SMHI is a current-forecast snapshot, not per-day; fetch once for today.
+            days = [today] if source == "smhi" else list(_daterange(args.start, end))
+            for day in days:
                 rows, err = ingest_day(source, zone, day)
                 total += rows
                 tag = f"{source}/{zone}/{day}"

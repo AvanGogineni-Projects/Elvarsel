@@ -1,78 +1,32 @@
-name: Daily forecast + deploy
+name: Daily forecast
 
 # Ingest -> retrain -> forecast -> log for every zone, before the ~12:00 CET
 # day-ahead gate (09:15 UTC = 10:15 CET / 11:15 CEST, after the TSOs' day-ahead
-# load forecasts are due). Then bake the dashboard's data into static JSON and
-# deploy the site to Vercel: no server runs between jobs.
+# load forecasts are due). This is the only place the model trains: it logs each
+# zone's forecast and 80% range to Postgres, and the read-only API on Vercel
+# serves them. Vercel itself deploys from Git; nothing is uploaded from here.
 on:
   schedule:
     - cron: "15 9 * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
 
 concurrency:
-  group: daily-deploy
+  group: daily-forecast
   cancel-in-progress: false
 
 jobs:
   daily:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Only a yes/no flag at job level, so the deploy step's `if` can read it (a
-    # step's own env doesn't exist yet when its `if` is evaluated). The token
-    # itself stays scoped to the deploy step, not every step of the job.
-    env:
-      HAS_VERCEL: ${{ secrets.VERCEL_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e .
-
-      - name: Ingest, retrain, forecast, log, export snapshot
-        id: daily
-        # A failed zone fails the run (below) but must not block deploying the others.
-        continue-on-error: true
+      - run: pip install -e ".[ml]"
+      - name: Ingest, retrain, forecast, log
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENTSOE_API_TOKEN: ${{ secrets.ENTSOE_API_TOKEN }}
-        run: python -m elvarsel.daily --export frontend/public/data
-
-      - uses: actions/setup-node@v4
-        if: hashFiles('frontend/public/data/zones.json') != ''
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build static site
-        if: hashFiles('frontend/public/data/zones.json') != ''
-        working-directory: frontend
-        env:
-          VITE_STATIC_DATA: "1"
-        run: npm ci && npm run build
-
-      - name: Deploy to Vercel
-        id: deploy
-        if: hashFiles('frontend/public/data/zones.json') != '' && env.HAS_VERCEL == 'true'
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: npx --yes vercel@65.2.0 deploy frontend/dist --prod --yes --token "$VERCEL_TOKEN"
-
-      - name: Report a failed daily run
-        if: steps.daily.outcome == 'failure'
-        env:
-          DEPLOY: ${{ steps.deploy.outcome }}
-        run: |
-          # Say what actually happened: a partial deploy, or none at all.
-          if [ "$DEPLOY" = "success" ]; then
-            echo "::error::The daily job reported failures (see its step log). The site was deployed with the zones that succeeded."
-          else
-            echo "::error::The daily job failed (see its step log) and nothing was deployed. Check the repo secrets: DATABASE_URL, ENTSOE_API_TOKEN, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID."
-          fi
-          exit 1
+        run: python -m elvarsel.daily

@@ -23,7 +23,7 @@ TABLES: dict[str, list[str]] = {
     "raw_entsoe": ["zone", "metric", "time_start", "value"],
     "raw_weather": ["zone", "reference_time", "time", "air_temperature", "wind_speed"],
     "raw_nwp": ["zone", "metric", "time_start", "value"],
-    "forecast_log": ["zone", "as_of", "target_time", "model_version", "price_eur_mwh"],
+    "forecast_log": ["zone", "as_of", "target_time", "model_version", "price_eur_mwh", "low", "high"],
 }
 PK: dict[str, list[str]] = {
     "raw_price": ["zone", "time_start"],
@@ -64,6 +64,10 @@ def _engine():
         max_overflow=2,  # <= 5 server sessions, safe headroom under the 15 cap
         pool_pre_ping=True,
         pool_recycle=1800,  # drop idle conns the pooler would reap
+        # No server-side prepared statements: Supabase's transaction pooler (port
+        # 6543, the right one for serverless/Vercel) can't keep them across
+        # transactions. Harmless on the session pooler.
+        connect_args={"prepare_threshold": None},
     )
 
 
@@ -95,10 +99,19 @@ def upsert(df: pd.DataFrame, table: str) -> int:
     return len(df)
 
 
-def read_zone(table: str, zone: str) -> pd.DataFrame:
+def read_zone(
+    table: str, zone: str, *, since: pd.Timestamp | None = None, metric: str | None = None
+) -> pd.DataFrame:
+    """A zone's rows; `since` / `metric` narrow the read in SQL (the API reads a
+    window, not ~100k rows of history, so serverless requests stay fast)."""
     from sqlalchemy import text
 
-    return pd.read_sql(text(f"select * from {table} where zone = :z"), _engine(), params={"z": zone})
+    sql, params = f"select * from {table} where zone = :z", {"z": zone}
+    if since is not None:
+        sql, params["since"] = sql + " and time_start >= :since", since
+    if metric is not None:
+        sql, params["m"] = sql + " and metric = :m", metric
+    return pd.read_sql(text(sql), _engine(), params=params)
 
 
 # source directory -> table

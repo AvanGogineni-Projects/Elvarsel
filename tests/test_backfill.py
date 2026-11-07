@@ -44,7 +44,7 @@ def test_non_swedish_zone_prices_come_from_entsoe(monkeypatch):
             "value": [55.0, 4000.0],
         }
     )
-    monkeypatch.setattr(build, "load_entsoe", lambda z: raw)
+    monkeypatch.setattr(build, "load_entsoe", lambda z, since=None, metric=None: raw)
     p = build.load_prices("NO1")
     assert p["eur_per_kwh"].tolist() == [0.055]  # load row excluded, EUR/MWh -> EUR/kWh
     assert build.hourly_price(p).tolist() == [55.0]

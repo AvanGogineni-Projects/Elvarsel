@@ -58,6 +58,11 @@ WIND_SITES: dict[str, tuple[tuple[float, float], ...]] = {
     "DK2": ((54.8, 11.4), (55.0, 12.8)),  # Lolland / Kriegers Flak
 }
 
+# Live forecasts come from this model family; older per-zone models are retired.
+MODEL_FAMILY = "lgbm-nordic"
+# Walk-forward backtest summary (written by models.report, served by /v1/backtest).
+BACKTEST_JSON = Path(__file__).resolve().parents[2] / "docs" / "backtest-results.json"
+
 ENTSOE_API_TOKEN: str | None = os.getenv("ENTSOE_API_TOKEN") or None
 
 DATA_DIR = Path(os.getenv("ELVARSEL_DATA_DIR", "data"))

@@ -18,7 +18,7 @@ from elvarsel.models.train import LGBM_PARAMS
 # sample (upward spikes escaped the top). Model quantiles 4%/96% cover 80% in the
 # walk-forward backtest, so `low`/`high` form an honest 80% range.
 QUANTILES = (0.04, 0.96)
-MODEL_FAMILY = "lgbm-nordic"  # live accuracy scores only this family (not retired per-zone models)
+MODEL_FAMILY = config.MODEL_FAMILY
 
 
 def train_and_forecast_all(*, horizon: int = 24) -> tuple[str, dict[str, pd.DataFrame]]:

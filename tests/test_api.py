@@ -19,22 +19,31 @@ def test_zones_lists_all_12_with_currency(monkeypatch):
 def test_prices_returns_last_n_days_hourly(monkeypatch):
     idx = pd.date_range("2026-11-01T00:00:00Z", periods=4 * 24 * 10, freq="15min", tz="UTC")
     raw = pd.DataFrame({"time_start": idx, "eur_per_kwh": 0.05})
-    monkeypatch.setattr(main.build, "load_prices", lambda z: raw)
+    seen = {}
+    monkeypatch.setattr(main.build, "load_prices", lambda z, since=None: seen.setdefault("since", since) and raw)
     body = TestClient(main.app).get("/v1/prices", params={"zone": "NO1", "days": 2}).json()
     assert body["unit"] == "EUR/MWh"
     assert len(body["points"]) == 48  # 2 days of hourly points
     assert body["points"][0]["price_eur_mwh"] == 50.0
+    assert seen["since"] is not None  # the API reads a window, not the full history
     assert TestClient(main.app).get("/v1/prices", params={"zone": "XX"}).status_code == 404
 
 
-def test_forecast_503_when_zone_has_no_data(monkeypatch):
-    frame = pd.DataFrame({"time": pd.date_range("2026-11-08", periods=24, freq="1h", tz="UTC"),
-                          "price_eur_mwh": 1.0, "low": 0.0, "high": 2.0})
-    main._CACHE.clear()
-    monkeypatch.setattr(main.fc, "train_and_forecast_all", lambda: ("v", {"SE3": frame}))
+def test_forecast_503_when_no_run_is_logged(monkeypatch):
+    monkeypatch.setattr(main.monitoring, "latest_forecast", lambda zone, family: None)
     r = TestClient(main.app).get("/v1/forecast", params={"zone": "DK1"})
     assert r.status_code == 503
-    assert "no data" in r.json()["detail"]
+    assert "no forecast" in r.json()["detail"]
+
+
+def test_api_imports_no_training_libraries():
+    """The read-only API must stay deployable without the ML extra (Vercel bundle)."""
+    import subprocess
+    import sys
+
+    code = "import sys, elvarsel.api.main; print(','.join(m for m in ('lightgbm','sklearn','mlflow','entsoe') if m in sys.modules))"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
+    assert out == ""
 
 
 def test_fx_latest_is_none_when_ecb_unreachable(monkeypatch):
@@ -51,9 +60,9 @@ def test_backtest_serves_report_json(monkeypatch, tmp_path):
 
     summary = pd.DataFrame([{"zone": "SE3", "model_mae": 17.7, "baseline_mae": 30.0, "mae_improvement_pct": 41.0}])
     path = report.write_json(summary, path=tmp_path / "bt.json", n_splits=52)
-    monkeypatch.setattr(main.report, "JSON_PATH", path)
+    monkeypatch.setattr(main.config, "BACKTEST_JSON", path)
     body = TestClient(main.app).get("/v1/backtest").json()
     assert body["weeks"] == 52 and body["zones"]["SE3"]["improvement_pct"] == 41.0
 
-    monkeypatch.setattr(main.report, "JSON_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(main.config, "BACKTEST_JSON", tmp_path / "missing.json")
     assert TestClient(main.app).get("/v1/backtest").status_code == 404

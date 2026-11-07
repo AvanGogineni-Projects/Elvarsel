@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
-import { COUNTRY_NAME, STATIC_DATA, type Zone } from "./api";
+import { COUNTRY_NAME, type Zone } from "./api";
 import Controls from "./components/Controls";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
@@ -104,7 +104,7 @@ export default function App() {
           <div className="caps flex items-center gap-3 text-mute">
             <span className="flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${health === "live" ? "bg-fg" : "bg-signal"}`} />
-              <span className="text-fg">{STATIC_DATA && health === "live" ? "Daily snapshot" : STATUS[health].label}</span>
+              <span className="text-fg">{STATUS[health].label}</span>
             </span>
             {lastUpdated && <span className="hidden sm:inline">updated {relTime(new Date(lastUpdated).toISOString())}</span>}
             <button

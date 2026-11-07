@@ -23,7 +23,7 @@ Phase 0 — backend + data ingestion. Three data sources:
 ```bash
 python -m venv .venv
 .venv/Scripts/activate            # Windows; use source .venv/bin/activate on *nix
-pip install -e .                  # runtime + dev deps from requirements.txt
+pip install -e ".[ml]"           # serving deps + training/dev extra (requirements-ml.txt)
 cp .env.example .env              # add ENTSOE_API_TOKEN when you have it
 ```
 
@@ -94,36 +94,34 @@ pytest -q
 CI (GitHub Actions) runs ruff + pytest on Python 3.12 for every PR and for
 pushes to `main`.
 
-## Deploy (static site on Vercel, pipeline on GitHub Actions)
+## Deploy (Vercel services + scheduled GitHub Action)
 
-No server runs in production. Day-ahead prices are set once a day, so a daily
-snapshot loses nothing:
+Training and serving are split:
 
-1. `.github/workflows/daily.yml` runs at 09:15 UTC (and on pushes to `main`):
-   ingest → retrain → forecast → log, then `--export` bakes every response the
-   dashboard reads into `frontend/public/data/*.json` (same shapes as the API,
-   produced by the API's own functions).
-2. It builds the dashboard with `VITE_STATIC_DATA=1` (reads `/data/*.json`
-   instead of the API) and deploys `frontend/dist` with the Vercel CLI.
+- **GitHub Action** (`.github/workflows/daily.yml`, 09:15 UTC, before the
+  12:00 CET auction gate): ingest → retrain → forecast → log each zone's
+  forecast and 80% range to Postgres. The only place the model trains.
+- **Vercel** (`vercel.json`, one project, two services, deployed from Git on
+  every push):
+  - `frontend`: the Vite dashboard, public at `/`.
+  - `api`: the **read-only** FastAPI app (`asgi:app`), public at `/v1/*` and
+    `/health`. It serves the logged forecasts plus price/accuracy windows, so it
+    needs only `requirements.txt` (~200 MB, no LightGBM) and answers in well
+    under a second. The dashboard calls it same-origin.
+
+No service calls another server-side, so there are no service bindings: the
+dashboard's API calls come from the browser through the public `/v1/*` route.
 
 One-time setup:
 
-- **Vercel:** create a project (e.g. `elvarsel`) **without** connecting the Git
-  repo (the Action deploys; a Git build would have no data), Framework preset
-  "Other", no build command. Create a token (Account → Tokens). The project's
-  Org ID and Project ID are in Project → Settings → General.
-- **GitHub repo secrets** (Settings → Secrets and variables → Actions):
-  `DATABASE_URL`, `ENTSOE_API_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
-  `VERCEL_PROJECT_ID`. Without the Vercel ones the job still runs and logs
-  forecasts; it just skips the deploy.
-- Then run the workflow once by hand (Actions → Daily forecast + deploy → Run).
+1. **Vercel:** import the GitHub repo as a project (it reads `vercel.json`).
+   Add env var `DATABASE_URL` (Production + Preview). Prefer Supabase's
+   **transaction pooler** URL (port `6543`) for serverless.
+2. **GitHub repo secrets** (Settings → Secrets and variables → Actions):
+   `DATABASE_URL`, `ENTSOE_API_TOKEN`.
+3. Run **Daily forecast** once by hand (Actions → Daily forecast → Run) so the
+   API has forecasts to serve, before the first scheduled run.
 
-Try the static build locally:
+Local: `vercel dev` runs both services together; or run them separately
+(`uvicorn elvarsel.api.main:app` + `npm run dev` in `frontend/`).
 
-```bash
-python -m elvarsel.daily --skip-ingest --export frontend/public/data
-cd frontend && VITE_STATIC_DATA=1 npm run build && npm run preview
-```
-
-The FastAPI service (`Dockerfile`, `uvicorn elvarsel.api.main:app`) stays the
-development backend and the reference for the JSON contract.

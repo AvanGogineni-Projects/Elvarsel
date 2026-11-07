@@ -1,5 +1,3 @@
-import time
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -39,21 +37,33 @@ def test_health_and_unknown_zone():
     assert client.get("/v1/forecast", params={"zone": "ZZ"}).status_code == 404
 
 
-def test_forecast_endpoint_shape(monkeypatch):
+def test_forecast_endpoint_serves_the_latest_logged_run(monkeypatch):
+    from elvarsel import monitoring
     from elvarsel.api import main
 
     times = pd.date_range("2026-11-06T00:00:00Z", periods=24, freq="1h", tz="UTC")
-    fake_df = pd.DataFrame({"time": times, "price_eur_mwh": np.linspace(50, 70, 24)})
-    fake_df["low"], fake_df["high"] = fake_df["price_eur_mwh"] - 5, fake_df["price_eur_mwh"] + 5
-    monkeypatch.setitem(main._CACHE, "nordic", ("lgbm-SE3-test", {"SE3": fake_df}, time.monotonic()))
-    monkeypatch.setattr(main.monitoring, "log_forecast", lambda *a, **k: 0)
+    rows = pd.DataFrame({
+        "as_of": times[0], "target_time": times, "model_version": "lgbm-nordic-test",
+        "price_eur_mwh": np.linspace(50, 70, 24), "low": np.linspace(45, 65, 24), "high": np.linspace(55, 75, 24),
+    })
+    monkeypatch.setattr(main.monitoring, "latest_forecast", lambda zone, family: monitoring.forecast_body(zone, rows))
 
     body = TestClient(main.app).get("/v1/forecast", params={"zone": "SE3"}).json()
-    assert body["zone"] == "SE3"
-    assert body["model_version"] == "lgbm-SE3-test"
+    assert body["zone"] == "SE3" and body["unit"] == "EUR/MWh"
+    assert body["model_version"] == "lgbm-nordic-test"
+    assert body["as_of"] == times[0].isoformat()
     assert len(body["forecast"]) == 24
-    assert body["forecast"][0]["price_eur_mwh"] == 50.0
-    assert body["forecast"][0]["low"] == 45.0 and body["forecast"][0]["high"] == 55.0
+    assert body["forecast"][0] == {"time": times[0].isoformat(), "price_eur_mwh": 50.0, "low": 45.0, "high": 55.0}
+
+
+def test_forecast_body_handles_rows_logged_before_ranges_existed():
+    from elvarsel import monitoring
+
+    t = pd.Timestamp("2026-11-06T00:00:00Z")
+    rows = pd.DataFrame({"as_of": [t], "target_time": [t], "model_version": ["lgbm-nordic-x"],
+                         "price_eur_mwh": [50.0], "low": [None], "high": [None]})
+    assert monitoring.forecast_body("SE3", rows)["forecast"][0]["low"] is None
+    assert monitoring.forecast_body("SE3", rows.iloc[:0]) is None
 
 
 def test_order_band_uncrosses_quantiles():

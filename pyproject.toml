@@ -7,7 +7,7 @@ name = "elvarsel"
 version = "0.0.1"
 description = "Swedish electricity forecasting platform (ML/MLOps)"
 requires-python = ">=3.11"
-dynamic = ["dependencies"]
+dynamic = ["dependencies", "optional-dependencies"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -17,6 +17,7 @@ where = ["src"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {ml = {file = ["requirements-ml.txt"]}}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

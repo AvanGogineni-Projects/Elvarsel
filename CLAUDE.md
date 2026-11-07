@@ -45,7 +45,7 @@ frontend/        Vite + React + TS dashboard (its own README)
 ```bash
 # Setup (Windows paths; use source .venv/bin/activate on *nix)
 python -m venv .venv && .venv/Scripts/activate
-pip install -e .
+pip install -e ".[ml]"          # serving deps + training/dev extra
 cp .env.example .env            # add ENTSOE_API_TOKEN and DATABASE_URL
 
 # Run the API (models train lazily per zone on first request, ~1s each)
@@ -99,7 +99,7 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 ## API
 
 - `GET /health` → `{status, version}`
-- `GET /v1/forecast?zone=` (any of the 12) → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh, low, high}]}` (24 hourly points, next day; low/high = calibrated 80% range from 4%/96% quantile models). Logs the point forecast to `forecast_log` (best-effort).
+- `GET /v1/forecast?zone=` (any of the 12) → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh, low, high}]}` (24 hourly points, next day; low/high = calibrated 80% range from 4%/96% quantile models). Served from the latest run the daily job logged to `forecast_log`; 503 before the first run.
 - `GET /v1/status` → `{service, version, zones, models:{zone:version}}` (models populate lazily per served zone)
 - `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon + `points` (forecast vs actual per hour, latest forecast per hour) over **matured** logged forecasts; `n=0` until forecasts age past their horizon and actuals land (~24h).
 
@@ -150,18 +150,18 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 - **SMHI has no history** — it serves only the current ~84h forecast. Past
   snapshots are unrecoverable, which is why the DB store matters (back up
   `data/smhi/` as daily snapshots accumulate).
-- **In-process training:** the API trains the Nordic model in a background
-  thread at startup (~1 min cold), caches every zone's forecast, refreshes
-  hourly, and serializes training behind a lock. Don't reload history per
-  request: ~110k rows per zone exhausts the 5-conn pool.
-- **Production is static.** The daily Action exports API-shaped JSON
-  (`src/elvarsel/export.py`) and deploys `frontend/dist` to Vercel; the site
-  reads `/data/*.json` when built with `VITE_STATIC_DATA=1`. Any API response
-  change must keep `export.py` (and its test) in step. `frontend/public/data/`
-  is generated and gitignored.
-- **Daily job secrets:** repo secrets `DATABASE_URL`, `ENTSOE_API_TOKEN`,
-  `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (set in GitHub; never
-  commit them). The Vercel project must not be Git-connected.
+- **The API is read-only.** Only the daily job trains; it logs each zone's
+  forecast + `low`/`high` to `forecast_log`, and the API serves the latest run
+  (`monitoring.latest_forecast`). The API must never import LightGBM /
+  scikit-learn / MLflow / entsoe (`test_api_imports_no_training_libraries`):
+  Vercel installs only `requirements.txt`. Training/dev deps live in
+  `requirements-ml.txt` (the `ml` extra). Read windows, not whole histories
+  (`load_prices(zone, since=...)`): ~110k rows per zone is too slow per request.
+- **Deploy:** Vercel services from `vercel.json` (`frontend` at `/`, `api`
+  (`asgi:app`) at `/v1/*` and `/health`; no bindings: the browser calls the
+  API). Vercel env: `DATABASE_URL` (prefer the transaction pooler, port 6543;
+  prepared statements are disabled in `storage._engine`). GitHub secrets for
+  the daily job: `DATABASE_URL`, `ENTSOE_API_TOKEN`. Never commit them.
 - Each Supabase project has its own DB password — reset it in the Elvarsel
   project, not another.
 

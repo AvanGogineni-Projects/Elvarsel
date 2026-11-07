@@ -18,8 +18,7 @@ from elvarsel.features import build
 from elvarsel.models.train import evaluate, load_all
 
 REPORT_PATH = Path("docs/backtest-results.md")
-# Served by the API's /v1/backtest; anchored to the repo, not the working directory.
-JSON_PATH = Path(__file__).resolve().parents[3] / "docs" / "backtest-results.json"
+JSON_PATH = build.config.BACKTEST_JSON  # served by the API's /v1/backtest
 
 
 def evaluate_all(

@@ -93,19 +93,41 @@ export interface Backtest {
   baseline: string;
   zones: Partial<Record<Zone, { model_mae: number; baseline_mae: number; improvement_pct: number }>>;
 }
-export const fetchBacktest = (signal?: AbortSignal) => getJSON<Backtest>("/v1/backtest", signal);
+// Static mode (the Vercel build): the daily GitHub Action bakes every API response
+// into /data/*.json (src/elvarsel/export.py), same shapes, so no server is needed.
+export const STATIC_DATA = import.meta.env.VITE_STATIC_DATA === "1";
+const staticJSON = <T,>(file: string, signal?: AbortSignal) =>
+  fetch(`${import.meta.env.BASE_URL}data/${file}`, { signal }).then((r) => {
+    if (!r.ok) throw new Error(`${file} -> ${r.status}`);
+    return r.json() as Promise<T>;
+  });
+
+export const fetchBacktest = (signal?: AbortSignal) =>
+  STATIC_DATA ? staticJSON<Backtest>("backtest.json", signal) : getJSON<Backtest>("/v1/backtest", signal);
 
 export const fetchZones = (signal?: AbortSignal) =>
-  getJSON<{ zones: ZoneInfo[]; fx: Fx | null }>(`/v1/zones`, signal);
+  STATIC_DATA
+    ? staticJSON<{ zones: ZoneInfo[]; fx: Fx | null; generated_at?: string }>("zones.json", signal)
+    : getJSON<{ zones: ZoneInfo[]; fx: Fx | null; generated_at?: string }>(`/v1/zones`, signal);
 
 export const fetchForecast = (zone: Zone, signal?: AbortSignal) =>
-  getJSON<Forecast>(`/v1/forecast?zone=${zone}`, signal);
+  STATIC_DATA ? staticJSON<Forecast>(`forecast/${zone}.json`, signal) : getJSON<Forecast>(`/v1/forecast?zone=${zone}`, signal);
 
+// The snapshot has 7/30/90-day windows (the windows the dashboard asks for).
+const accWindow = (days: number) => (days <= 7 ? 7 : days <= 30 ? 30 : 90);
 export const fetchAccuracy = (zone: Zone, days = 7, signal?: AbortSignal) =>
-  getJSON<Accuracy>(`/v1/accuracy?zone=${zone}&days=${days}`, signal);
+  STATIC_DATA
+    ? staticJSON<Accuracy>(`accuracy/${zone}-${accWindow(days)}.json`, signal)
+    : getJSON<Accuracy>(`/v1/accuracy?zone=${zone}&days=${days}`, signal);
 
-export const fetchPrices = (zone: Zone, days = 30, signal?: AbortSignal) =>
-  getJSON<Prices>(`/v1/prices?zone=${zone}&days=${days}`, signal);
+// The snapshot holds a year of prices per zone; shorter ranges are sliced here,
+// with the same rule as the API (strictly within `days` of the latest hour).
+export const fetchPrices = async (zone: Zone, days = 30, signal?: AbortSignal): Promise<Prices> => {
+  if (!STATIC_DATA) return getJSON<Prices>(`/v1/prices?zone=${zone}&days=${days}`, signal);
+  const all = await staticJSON<Prices>(`prices/${zone}.json`, signal);
+  const last = all.points.length ? Date.parse(all.points[all.points.length - 1].time) : 0;
+  return { ...all, points: all.points.filter((p) => Date.parse(p.time) > last - days * 86_400_000) };
+};
 
 // --- Mock fallback ---------------------------------------------------------
 // Deterministic next-day curve: a daily double-peak (morning/evening) shape

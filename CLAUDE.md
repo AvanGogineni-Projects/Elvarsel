@@ -154,8 +154,14 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
   thread at startup (~1 min cold), caches every zone's forecast, refreshes
   hourly, and serializes training behind a lock. Don't reload history per
   request: ~110k rows per zone exhausts the 5-conn pool.
-- **Daily job secrets:** `.github/workflows/daily.yml` needs repo secrets
-  `DATABASE_URL` and `ENTSOE_API_TOKEN` (set them in GitHub; never commit them).
+- **Production is static.** The daily Action exports API-shaped JSON
+  (`src/elvarsel/export.py`) and deploys `frontend/dist` to Vercel; the site
+  reads `/data/*.json` when built with `VITE_STATIC_DATA=1`. Any API response
+  change must keep `export.py` (and its test) in step. `frontend/public/data/`
+  is generated and gitignored.
+- **Daily job secrets:** repo secrets `DATABASE_URL`, `ENTSOE_API_TOKEN`,
+  `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (set in GitHub; never
+  commit them). The Vercel project must not be Git-connected.
 - Each Supabase project has its own DB password — reset it in the Elvarsel
   project, not another.
 
@@ -163,5 +169,4 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 
 1. Model registry (MLflow): the daily job registers the model, the API loads it
    instead of training in-process.
-2. Deploy (Dockerfile targets Python 3.12).
-3. Spike drivers: interconnector capacity / outages (ENTSO-E A11/A80).
+2. Spike drivers: interconnector capacity / outages (ENTSO-E A11/A80).

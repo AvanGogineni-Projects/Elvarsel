@@ -1,12 +1,19 @@
-name: Daily forecast
+name: Daily forecast + deploy
 
 # Ingest -> retrain -> forecast -> log for every zone, before the ~12:00 CET
-# day-ahead gate. 09:15 UTC is 10:15 CET in winter and 11:15 CEST in summer,
-# after the TSOs' day-ahead load forecasts are due (2h before the gate).
+# day-ahead gate (09:15 UTC = 10:15 CET / 11:15 CEST, after the TSOs' day-ahead
+# load forecasts are due). Then bake the dashboard's data into static JSON and
+# deploy the site to Vercel: no server runs between jobs.
 on:
   schedule:
     - cron: "15 9 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: daily-deploy
+  cancel-in-progress: false
 
 jobs:
   daily:
@@ -19,8 +26,40 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - name: Ingest, retrain, forecast, log
+
+      - name: Ingest, retrain, forecast, log, export snapshot
+        id: daily
+        # A failed zone fails the run (below) but must not block deploying the others.
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENTSOE_API_TOKEN: ${{ secrets.ENTSOE_API_TOKEN }}
-        run: python -m elvarsel.daily
+        run: python -m elvarsel.daily --export frontend/public/data
+
+      - uses: actions/setup-node@v4
+        if: hashFiles('frontend/public/data/zones.json') != ''
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build static site
+        if: hashFiles('frontend/public/data/zones.json') != ''
+        working-directory: frontend
+        env:
+          VITE_STATIC_DATA: "1"
+        run: npm ci && npm run build
+
+      - name: Deploy to Vercel
+        if: hashFiles('frontend/public/data/zones.json') != '' && env.VERCEL_TOKEN != ''
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx --yes vercel@65.2.0 deploy frontend/dist --prod --yes --token "$VERCEL_TOKEN"
+
+      - name: Report a failed daily run
+        if: steps.daily.outcome == 'failure'
+        run: |
+          echo "The daily job reported failures (see its step log); the site was deployed with whatever succeeded."
+          exit 1

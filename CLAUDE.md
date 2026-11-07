@@ -10,7 +10,7 @@ point-in-time feature store → model + backtest → serving API → animated
 monitoring dashboard → accuracy/drift tracking. Prices are in **EUR/MWh**.
 
 Status: Phases 0–3 complete and merged to `main` — ingestion, features,
-LightGBM model beating a seasonal-naive baseline, FastAPI serving, React
+LightGBM model beating a naive (same hour yesterday) baseline, FastAPI serving, React
 dashboard, and forecast logging + live accuracy. Remaining roadmap is at the
 bottom of this file.
 
@@ -28,7 +28,7 @@ src/elvarsel/
   ingest/      elpris.py, entsoe_client.py, smhi.py, run.py  (CLI: python -m elvarsel.ingest.run)
                backfill.py (history straight to DB: python -m elvarsel.ingest.backfill)
   features/    build.py (point-in-time feature table), backtest.py (rolling-origin)
-  models/      baseline.py (seasonal-naive), train.py, forecast.py (prod predict),
+  models/      baseline.py (naive: same hour yesterday), train.py, forecast.py (prod predict),
                metrics.py (mae/rmse/mape), report.py, evaluate.py
   api/         main.py  (FastAPI: /health, /v1/forecast, /v1/status, /v1/accuracy)
   monitoring.py  forecast logging + live accuracy/drift scoring
@@ -53,6 +53,8 @@ uvicorn elvarsel.api.main:app --reload     # :8000, CORS open
 python -m elvarsel.ingest.run --source all
 python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-05
 python -m elvarsel.ingest.backfill --years 2      # history -> DB, hourly, resumable
+python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
+python -m elvarsel.models.report --no-track       # 13-week walk-forward -> docs/backtest-results.md
 
 # Lint + test  (CI runs these on Python 3.12 for every PR)
 ruff check src tests
@@ -76,7 +78,8 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
   with a bounded pool (`pool_size=3, max_overflow=2`). Do **not** build an
   engine per call — the session pooler caps at 15 clients and a per-call pool
   exhausts it (`EMAXCONNSESSION` 500s).
-- **Tables:** `raw_price`, `raw_entsoe`, `raw_weather`, `forecast_log`. Writes
+- **Tables:** `raw_price`, `raw_entsoe` (metrics: price, `load_mw`,
+  `load/wind/solar_forecast_mw`), `raw_weather`, `forecast_log`. Writes
   go through `storage.upsert` (idempotent on each table's PK).
 - **Zones** live in `config.ZONES` (country, currency, city/coords, ENTSO-E
   area) — the single source of truth. **Price source:** Swedish zones use
@@ -97,9 +100,19 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 ## Modelling rules (don't violate)
 
 - **Point-in-time correctness.** Every feature must be knowable before the
-  forecast time. Price/load use lags ≥24h; weather uses only SMHI snapshots
-  issued at/before the ~12:00 CET day-ahead gate (`_da_cutoff`). The
-  contemporaneous price is the target, never a feature.
+  forecast time (the ~12:00 CET gate on D-1). Prices: same-hour lags ≥24h and
+  D-1 daily stats (all of D-1 is known). Actual load: lags ≥48h only (D-1
+  afternoon isn't published at the gate). Fundamentals: ENTSO-E day-ahead
+  *load* forecast only. Wind/solar forecasts are stored but must NOT be
+  features: they're due 18:00 D-1, after the gate (enforced by a test). Weather: only SMHI snapshots
+  issued at/before the gate (`_da_cutoff`). The contemporaneous price is the
+  target, never a feature.
+- **One feature path.** Serving builds its rows with
+  `build_features(..., horizon=24)`, the same code as training; never
+  re-implement features in `forecast.py` (`test_serving_rows_match_training_rows`).
+- **Benchmark is naive-24** (same hour yesterday); it beats same-hour-last-week
+  by 13–41%. Evaluate with 13 weekly walk-forward origins, not 3 (too noisy).
+  Analysis + results: `docs/model-analysis.md`.
 - **UTC everywhere** in storage/compute; convert to `Europe/Stockholm` only for
   calendar features. DST days handled by the resample, no special-casing.
 - **Mixed resolution:** pre-2026 Elpris is hourly, now 15-min; resampled to
@@ -125,9 +138,10 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 - **SMHI has no history** — it serves only the current ~84h forecast. Past
   snapshots are unrecoverable, which is why the DB store matters (back up
   `data/smhi/` as daily snapshots accumulate).
-- **Lazy training:** the API trains and caches one model per zone on first
-  request (sub-second on ~700 rows). A model registry replaces this later; the
-  HTTP contract stays the same.
+- **Lazy training:** the API loads a zone's history once, trains, and caches
+  the model's next-day forecast on first request (restart to refresh). Don't
+  reload history per request: ~110k rows per zone exhausts the 5-conn pool.
+  A model registry + scheduled job replaces this later; HTTP contract unchanged.
 - Each Supabase project has its own DB password — reset it in the Elvarsel
   project, not another.
 

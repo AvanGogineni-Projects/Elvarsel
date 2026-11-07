@@ -99,8 +99,8 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": len(g)}
         for h, g in sorted(df.groupby("h"), key=lambda kv: kv[0])
     ]
-    # Seasonal-naive baseline (same hour last week), as in the backtest: the model must beat it.
-    df["baseline"] = realized.reindex(pd.DatetimeIndex(df["target_time"]) - pd.Timedelta(days=7)).to_numpy()
+    # Naive baseline (same hour the previous day), as in the backtest: the model must beat it.
+    df["baseline"] = realized.reindex(pd.DatetimeIndex(df["target_time"]) - pd.Timedelta(days=1)).to_numpy()
     has_base = df.dropna(subset=["baseline"])
     # Forecast vs actual per hour for charting; if an hour was forecast more than once, show the latest.
     latest = df.sort_values("as_of").drop_duplicates("target_time", keep="last").sort_values("target_time")

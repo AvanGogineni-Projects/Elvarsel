@@ -71,7 +71,8 @@ def upsert(df: pd.DataFrame, table: str) -> int:
     # Unique per call: concurrent upserts (12 zones logging forecasts at once) must not share a stage table.
     stage = f"_stage_{table}_{uuid.uuid4().hex[:12]}"
     with _engine().begin() as con:
-        df.to_sql(stage, con, if_exists="replace", index=False)
+        # Multi-row INSERTs: row-by-row executemany costs a pooler round trip per row (~85s/month of data).
+        df.to_sql(stage, con, if_exists="replace", index=False, method="multi", chunksize=1000)
         con.execute(
             text(
                 f'insert into {table} ({collist}) select {collist} from "{stage}" '

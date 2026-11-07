@@ -73,10 +73,10 @@ def test_score_empty_inputs():
     }
 
 
-def test_score_baseline_is_same_hour_last_week():
+def test_score_baseline_is_same_hour_previous_day():
     log = _log("2026-11-08T00:00:00Z", [50.0, 60.0])
-    idx = pd.DatetimeIndex(["2026-11-01T00:00:00Z", "2026-11-08T00:00:00Z", "2026-11-08T01:00:00Z"])
-    realized = pd.Series([40.0, 48.0, 58.0], index=idx)  # 2026-11-01T01 missing -> no baseline for hour 2
+    idx = pd.DatetimeIndex(["2026-11-07T00:00:00Z", "2026-11-08T00:00:00Z", "2026-11-08T01:00:00Z"])
+    realized = pd.Series([40.0, 48.0, 58.0], index=idx)  # 2026-11-07T01 missing -> no baseline for hour 2
     s = monitoring.score(log, realized)
     assert [p["baseline"] for p in s["points"]] == [40.0, None]
     assert s["baseline_mae"] == pytest.approx(8.0)  # |48 - 40|, only where a baseline exists

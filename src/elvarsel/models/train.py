@@ -1,4 +1,4 @@
-"""Train + backtest LightGBM against the seasonal-naive baseline, log to MLflow.
+"""Train + backtest LightGBM against the naive baseline (same hour yesterday), log to MLflow.
 
 Rolling-origin backtest: for each split, fit on the past, predict the held-out
 week, score model vs baseline. The deliverable is beating the baseline by a
@@ -19,9 +19,15 @@ from elvarsel.features.backtest import rolling_origin_splits
 from elvarsel.models import baseline, metrics
 
 LGBM_PARAMS = {
-    "n_estimators": 300,
+    # L1 = optimise the headline metric (MAE) directly; robust to the price spikes
+    # that dominate squared error (top 5% of hours carry ~22% of absolute error).
+    "objective": "l1",
+    "n_estimators": 400,
     "learning_rate": 0.05,
     "num_leaves": 31,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.8,
     "random_state": 42,
     "n_jobs": -1,
     "verbose": -1,
@@ -36,7 +42,7 @@ def evaluate(
     df: pd.DataFrame,
     zone: str,
     *,
-    n_splits: int = 3,
+    n_splits: int = 13,
     test_days: int = 7,
     track: bool = True,
     params: dict | None = None,
@@ -55,7 +61,7 @@ def evaluate(
         x_te, y_te = df.loc[test_mask, feats], df.loc[test_mask, "target"].to_numpy()
         last_model = LGBMRegressor(**params).fit(x_tr, y_tr)
         pred = last_model.predict(x_te)
-        base = baseline.seasonal_naive(df.loc[test_mask]).to_numpy()
+        base = baseline.naive(df.loc[test_mask]).to_numpy()
         per_split.append(
             {
                 "split": i,
@@ -111,7 +117,7 @@ def _load_zone(zone: str) -> pd.DataFrame:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="elvarsel.models.train")
     p.add_argument("--zone", default="SE3", choices=list(build.config.ZONES))
-    p.add_argument("--n-splits", type=int, default=3)
+    p.add_argument("--n-splits", type=int, default=13)
     p.add_argument("--test-days", type=int, default=7)
     p.add_argument("--no-track", action="store_true", help="skip MLflow logging")
     args = p.parse_args(argv)

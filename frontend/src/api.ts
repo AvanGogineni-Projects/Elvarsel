@@ -79,7 +79,7 @@ export interface Accuracy {
   mae: number | null;
   rmse: number | null;
   bias: number | null; // +ve = model over-forecasts
-  baseline_mae: number | null; // seasonal-naive (same hour last week) on the same hours
+  baseline_mae: number | null; // naive (same hour the previous day) on the same hours
   by_horizon: { h: number; mae: number; n: number }[];
   points: { time: string; forecast: number; actual: number; baseline: number | null }[];
 }

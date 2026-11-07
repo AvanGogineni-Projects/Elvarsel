@@ -17,10 +17,10 @@ def synthetic_sources(monkeypatch):
 
 
 def test_train_and_forecast_next_day(synthetic_sources):
-    model, feats, version = fc.train_model("SE3")
+    version, df = fc.train_and_forecast("SE3", horizon=24)
     assert version.startswith("lgbm-SE3-")
-    df = fc.forecast_next_day("SE3", model, feats, horizon=24)
     assert len(df) == 24
+    assert df["time"].min() > pd.Timestamp("2026-05-20T23:00:00Z")  # after the last known price
     assert df["price_eur_mwh"].notna().all()
     # forecast hours are strictly after the last known price hour
     assert df["time"].is_monotonic_increasing
@@ -39,8 +39,7 @@ def test_forecast_endpoint_shape(monkeypatch):
 
     times = pd.date_range("2026-11-06T00:00:00Z", periods=24, freq="1h", tz="UTC")
     fake_df = pd.DataFrame({"time": times, "price_eur_mwh": np.linspace(50, 70, 24)})
-    monkeypatch.setitem(main._CACHE, "SE3", ("model", ["f"], "lgbm-SE3-test"))
-    monkeypatch.setattr(main.fc, "forecast_next_day", lambda z, m, f: fake_df)
+    monkeypatch.setitem(main._CACHE, "SE3", ("lgbm-SE3-test", fake_df))
     monkeypatch.setattr(main.monitoring, "log_forecast", lambda *a, **k: 0)
 
     body = TestClient(main.app).get("/v1/forecast", params={"zone": "SE3"}).json()

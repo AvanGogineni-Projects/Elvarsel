@@ -1,7 +1,7 @@
 """Evaluate every zone and write a committed per-zone results table.
 
 This is the spec's "experiment comparison" artifact: honest MAE/RMSE per zone
-against the seasonal-naive baseline, reproducible from the repo.
+against the naive baseline (same hour yesterday), reproducible from the repo.
 
     python -m elvarsel.models.report
 """
@@ -22,7 +22,7 @@ REPORT_PATH = Path("docs/backtest-results.md")
 def evaluate_all(
     zones: list[str] | None = None,
     *,
-    n_splits: int = 3,
+    n_splits: int = 13,
     test_days: int = 7,
     track: bool = True,
 ) -> pd.DataFrame:
@@ -47,7 +47,7 @@ def evaluate_all(
     return pd.DataFrame(rows)
 
 
-def write_report(summary: pd.DataFrame, *, path: Path = REPORT_PATH, n_splits: int = 3) -> Path:
+def write_report(summary: pd.DataFrame, *, path: Path = REPORT_PATH, n_splits: int = 13) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     today = dt.date.today().isoformat()
     lines = [
@@ -57,7 +57,7 @@ def write_report(summary: pd.DataFrame, *, path: Path = REPORT_PATH, n_splits: i
         "",
         (
             f"Rolling-origin backtest, {n_splits} weekly splits. "
-            "LightGBM vs seasonal-naive (same hour last week). "
+            "LightGBM vs naive (same hour the previous day). "
             "MAE/RMSE in EUR/MWh; lower is better. MAPE is omitted — Nordic prices reach "
             "zero/negative, which makes percentage error meaningless."
         ),
@@ -83,7 +83,7 @@ def write_report(summary: pd.DataFrame, *, path: Path = REPORT_PATH, n_splits: i
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="elvarsel.models.report")
-    p.add_argument("--n-splits", type=int, default=3)
+    p.add_argument("--n-splits", type=int, default=13)
     p.add_argument("--test-days", type=int, default=7)
     p.add_argument("--no-track", action="store_true")
     args = p.parse_args(argv)

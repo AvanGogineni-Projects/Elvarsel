@@ -2,6 +2,7 @@
 
     python -m elvarsel.ingest.backfill --years 2
     python -m elvarsel.ingest.backfill --zones NO1 DK1 --start 2025-01-01
+    python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
 
 Stores hourly means (not native 15-min) to keep the history small; the feature
 builder resamples to hourly anyway. Only fills time *before* the earliest row
@@ -46,18 +47,25 @@ def months_newest_first(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd
     return out[::-1]
 
 
-def backfill_entsoe(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> int:
-    stop = min(end, _earliest("raw_entsoe", zone, "day_ahead_price_eur_mwh") or end)
+def backfill_entsoe(zone: str, start: pd.Timestamp, end: pd.Timestamp, *, fundamentals: bool = False) -> int:
+    """Price + load, or (fundamentals=True) the day-ahead load/wind/solar forecasts.
+    Each kind resumes from its own earliest stored row."""
+    fetch, metric, tag = (
+        (entsoe_client.fetch_fundamentals_range, "load_forecast_mw", "fundamentals")
+        if fundamentals
+        else (entsoe_client.fetch_range, "day_ahead_price_eur_mwh", "entsoe")
+    )
+    stop = min(end, _earliest("raw_entsoe", zone, metric) or end)
     total = 0
     for a, b in months_newest_first(start, stop):
         try:
-            df = entsoe_client.fetch_range(zone, a, b)
+            df = fetch(zone, a, b)
         except Exception as e:  # noqa: BLE001 - one bad month must not stop the run; rerun resumes
-            print(f"entsoe/{zone}/{a:%Y-%m}: FAILED {type(e).__name__}: {e}")
+            print(f"{tag}/{zone}/{a:%Y-%m}: FAILED {type(e).__name__}: {e}")
             continue
         n = storage.upsert(to_hourly(df, ["zone", "metric"], ["value"]), "raw_entsoe")
         total += n
-        print(f"entsoe/{zone}/{a:%Y-%m}: {n} rows")
+        print(f"{tag}/{zone}/{a:%Y-%m}: {n} rows")
     return total
 
 
@@ -92,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--years", type=float, default=2.0, help="how far back from --end")
     p.add_argument("--start", type=dt.date.fromisoformat, default=None, help="overrides --years")
     p.add_argument("--end", type=dt.date.fromisoformat, default=dt.date.today())
+    p.add_argument("--fundamentals", action="store_true", help="backfill load/wind/solar forecasts only")
     args = p.parse_args(argv)
 
     if not storage.enabled():
@@ -106,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
 
     total = 0
     for zone in args.zones:
+        if args.fundamentals:
+            total += backfill_entsoe(zone, start, end, fundamentals=True)
+            continue
         if zone in config.ELPRIS_ZONES:
             total += backfill_elpris(zone, start, end)
         total += backfill_entsoe(zone, start, end)  # load everywhere, price outside Sweden

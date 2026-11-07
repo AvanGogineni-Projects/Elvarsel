@@ -25,15 +25,15 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex rounded-md border border-line bg-ink-800 p-0.5">
+    <div role="radiogroup" aria-label={label} className="card flex rounded-md border border-line p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
           role="radio"
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`rounded px-2.5 py-1 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
-            o.value === value ? "bg-ink-600 text-white" : "text-mute hover:text-soft"
+          className={`rounded px-2.5 py-1 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-fg/30 ${
+            o.value === value ? "bg-ink-600 text-fg" : "text-mute hover:text-soft"
           }`}
         >
           {o.label}

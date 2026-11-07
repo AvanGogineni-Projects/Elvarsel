@@ -8,6 +8,7 @@ import {
   YAxis,
 } from "recharts";
 import { zoneColor, type Forecast, type Zone } from "../api";
+import { useTheme } from "../theme";
 import { eur, hhmm, type Money } from "../lib";
 
 interface Props {
@@ -57,6 +58,7 @@ function ChartTooltip({ active, payload, money }: any) {
 }
 
 export default function OverviewChart({ zones, hidden, forecasts, selected, money, onSelect, onToggle }: Props) {
+  const { p } = useTheme();
   const shown = zones.filter((z) => !hidden.has(z));
   return (
     <>
@@ -69,8 +71,8 @@ export default function OverviewChart({ zones, hidden, forecasts, selected, mone
               onClick={() => onToggle(z)}
               aria-pressed={!off}
               title={off ? `Show ${z}` : `Hide ${z}`}
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
-                off ? "border-line text-mute line-through" : "border-white/15 text-soft hover:bg-ink-700"
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-fg/30 ${
+                off ? "border-line text-mute line-through" : "border-fg/15 text-soft hover:bg-ink-700"
               }`}
             >
               <span className="h-2 w-2 rounded-full" style={{ background: off ? "transparent" : zoneColor(z), boxShadow: `inset 0 0 0 1px ${zoneColor(z)}` }} />
@@ -81,22 +83,22 @@ export default function OverviewChart({ zones, hidden, forecasts, selected, mone
       </div>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={rows(shown.length ? shown : zones, forecasts, money)} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <CartesianGrid stroke={p.grid} vertical={false} />
           <XAxis
             dataKey="label"
             minTickGap={24}
-            tick={{ fill: "#8a8d96", fontSize: 11 }}
+            tick={{ fill: p.axis, fontSize: 11 }}
             tickLine={false}
-            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+            axisLine={{ stroke: p.axisLine }}
           />
           <YAxis
             width={56}
-            tick={{ fill: "#8a8d96", fontSize: 11 }}
+            tick={{ fill: p.axis, fontSize: 11 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v) => eur(v, 0)}
           />
-          <Tooltip content={<ChartTooltip money={money} />} cursor={{ stroke: "rgba(255,255,255,0.15)" }} />
+          <Tooltip content={<ChartTooltip money={money} />} cursor={{ stroke: p.cursor }} />
           {shown.map((z) => (
             <Line
               key={z}
@@ -106,7 +108,7 @@ export default function OverviewChart({ zones, hidden, forecasts, selected, mone
               strokeWidth={z === selected ? 2.75 : 1.5}
               strokeOpacity={z === selected ? 1 : 0.55}
               dot={false}
-              activeDot={{ r: 3.5, stroke: "#0b0c0e", strokeWidth: 2, onClick: () => onSelect(z) }}
+              activeDot={{ r: 3.5, stroke: p.surface, strokeWidth: 2, onClick: () => onSelect(z) }}
               onClick={() => onSelect(z)}
               style={{ cursor: "pointer" }}
               animationDuration={600}

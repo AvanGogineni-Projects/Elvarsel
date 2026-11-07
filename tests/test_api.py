@@ -44,3 +44,16 @@ def test_fx_latest_is_none_when_ecb_unreachable(monkeypatch):
     fx._rates.cache_clear()
     monkeypatch.setattr(fx.httpx, "get", boom)
     assert fx.latest({"SEK", "EUR"}) is None
+
+
+def test_backtest_serves_report_json(monkeypatch, tmp_path):
+    from elvarsel.models import report
+
+    summary = pd.DataFrame([{"zone": "SE3", "model_mae": 17.7, "baseline_mae": 30.0, "mae_improvement_pct": 41.0}])
+    path = report.write_json(summary, path=tmp_path / "bt.json", n_splits=52)
+    monkeypatch.setattr(main.report, "JSON_PATH", path)
+    body = TestClient(main.app).get("/v1/backtest").json()
+    assert body["weeks"] == 52 and body["zones"]["SE3"]["improvement_pct"] == 41.0
+
+    monkeypatch.setattr(main.report, "JSON_PATH", tmp_path / "missing.json")
+    assert TestClient(main.app).get("/v1/backtest").status_code == 404

@@ -1,5 +1,6 @@
 // API client for the Elvarsel FastAPI service.
 // Base URL is configurable via VITE_API_BASE (default http://localhost:8000).
+import { themedZoneColor } from "./theme";
 // Prices arrive in EUR/MWh (Nord Pool's settlement currency); display currency
 // conversion happens client-side with the ECB rates from /v1/zones.
 
@@ -32,21 +33,8 @@ export const COUNTRY_NAME: Record<string, string> = {
 };
 
 // Fixed colour per zone so a zone keeps its colour whatever the filter.
-export const ZONE_COLOR: Record<Zone, string> = {
-  SE1: "#7cc4fa",
-  SE2: "#5fd4a4",
-  SE3: "#b9a3fb",
-  SE4: "#f7869a",
-  NO1: "#fb923c",
-  NO2: "#facc15",
-  NO3: "#a3e635",
-  NO4: "#22d3ee",
-  NO5: "#e879f9",
-  DK1: "#f87171",
-  DK2: "#cbd5e1",
-  FI: "#3b82f6",
-};
-export const zoneColor = (z: Zone) => ZONE_COLOR[z] ?? "#8a8d96";
+// Theme-aware zone accents (deeper shades in light mode): see theme.tsx.
+export const zoneColor = (z: Zone) => themedZoneColor(z);
 
 // Only used when /v1/zones is unreachable (demo mode); the backend's config.ZONES is the source of truth.
 export const FALLBACK_ZONES: ZoneInfo[] = [
@@ -97,6 +85,15 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return (await res.json()) as T;
 }
+
+// Walk-forward backtest per zone: the measured accuracy while live scores accrue.
+export interface Backtest {
+  generated: string;
+  weeks: number;
+  baseline: string;
+  zones: Partial<Record<Zone, { model_mae: number; baseline_mae: number; improvement_pct: number }>>;
+}
+export const fetchBacktest = (signal?: AbortSignal) => getJSON<Backtest>("/v1/backtest", signal);
 
 export const fetchZones = (signal?: AbortSignal) =>
   getJSON<{ zones: ZoneInfo[]; fx: Fx | null }>(`/v1/zones`, signal);

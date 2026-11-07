@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FALLBACK_ZONES,
   fetchAccuracy,
+  fetchBacktest,
+  type Backtest,
   fetchForecast,
   fetchPrices,
   fetchZones,
@@ -21,6 +23,7 @@ export interface DashboardState {
   fx: Fx | null;
   forecasts: Record<Zone, Forecast | null>; // null = live backend has no data for the zone yet
   accuracy: Record<Zone, Accuracy | null>;
+  backtest: Backtest | null;
   health: Health;
   lastUpdated: number | null;
   loading: boolean;
@@ -49,6 +52,7 @@ export function useDashboard(): DashboardState {
   const [fx, setFx] = useState<Fx | null>(null);
   const [forecasts, setForecasts] = useState<Record<Zone, Forecast | null>>({});
   const [accuracy, setAccuracy] = useState<Record<Zone, Accuracy | null>>({});
+  const [backtest, setBacktest] = useState<Backtest | null>(null);
   const [health, setHealth] = useState<Health>("loading");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,8 +65,12 @@ export function useDashboard(): DashboardState {
     setLoading(true);
 
     // No zone list from the API means the backend is down: demo mode on the fallback zones.
-    const meta = await fetchZones(ac.signal).catch(() => null);
+    const [meta, bt] = await Promise.all([
+      fetchZones(ac.signal).catch(() => null),
+      fetchBacktest(ac.signal).catch(() => null),
+    ]);
     if (ac.signal.aborted) return;
+    setBacktest(bt);
     const list = meta?.zones ?? FALLBACK_ZONES;
     const codes = list.map((z) => z.code);
     setZones(list);
@@ -93,7 +101,7 @@ export function useDashboard(): DashboardState {
     };
   }, [load]);
 
-  return { zones, fx, forecasts, accuracy, health, lastUpdated, loading, refresh: load };
+  return { zones, fx, forecasts, accuracy, backtest, health, lastUpdated, loading, refresh: load };
 }
 
 // Detail data for one zone over a look-back window: realized prices + logged forecast accuracy.

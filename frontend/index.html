@@ -2,6 +2,14 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Apply the saved/system theme before first paint (no dark->light flash).
+      try {
+        var t = localStorage.getItem("elvarsel-theme");
+        if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.classList.toggle("dark", t === "dark");
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Elvarsel — Forecast Monitor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

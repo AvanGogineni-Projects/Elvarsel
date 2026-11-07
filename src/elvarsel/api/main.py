@@ -10,6 +10,7 @@ training run. A model registry replaces this later; the HTTP contract stays the 
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -22,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from elvarsel import __version__, config, fx, monitoring
 from elvarsel.features import build
 from elvarsel.models import forecast as fc
+from elvarsel.models import report
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +111,16 @@ def accuracy(
     days: int = Query(7, ge=1, le=90, description="look-back window"),
 ) -> dict:
     _known(zone)
-    return monitoring.accuracy(zone, days)
+    return monitoring.accuracy(zone, days, model_family=fc.MODEL_FAMILY)
+
+
+@app.get("/v1/backtest")
+def backtest() -> dict:
+    """Walk-forward backtest per zone (written by `python -m elvarsel.models.report`):
+    the measured accuracy, shown while live accuracy is still accruing."""
+    if not report.JSON_PATH.exists():
+        raise HTTPException(status_code=404, detail="no backtest yet: run python -m elvarsel.models.report")
+    return json.loads(report.JSON_PATH.read_text(encoding="utf-8"))
 
 
 @app.get("/v1/prices")

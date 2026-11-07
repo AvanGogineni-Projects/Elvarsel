@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { Forecast, Zone, ZoneInfo } from "../api";
 import { eur, stats, type Money } from "../lib";
+import { useTheme } from "../theme";
 import RAW from "../zones.geo.json";
 
 // Simplified bidding-zone outlines (scripts/build_zone_map.py): {zone: [[[lon, lat], ...], ...]}.
@@ -83,11 +84,9 @@ export function zoneAt(pt: [number, number]): Zone | null {
   return best;
 }
 
-// Sequential scale for price (cheap = deep teal, expensive = warm amber).
-const LOW = [22, 78, 99];
-const HIGH = [232, 176, 75];
-const shade = (t: number) =>
-  `rgb(${LOW.map((l, i) => Math.round(l + (HIGH[i] - l) * Math.max(0, Math.min(1, t)))).join(",")})`;
+// Sequential scale for price (cheap = teal, expensive = amber); endpoints come from the theme.
+const mix = ([lo, hi]: readonly (readonly number[])[], t: number) =>
+  `rgb(${lo.map((l, i) => Math.round(l + (hi[i] - l) * Math.max(0, Math.min(1, t)))).join(",")})`;
 
 interface Pin {
   name: string;
@@ -113,6 +112,8 @@ interface Props {
 
 export default function ZoneMap({ zones, forecasts, selected, money, onSelect }: Props) {
   const svg = useRef<SVGSVGElement>(null);
+  const { p: pal } = useTheme();
+  const shade = (t: number) => mix(pal.mapScale, t);
   const [hover, setHover] = useState<Zone | null>(null);
   const [pin, setPin] = useState<Pin | null>(null);
   const [query, setQuery] = useState("");
@@ -183,7 +184,7 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Find your town, e.g. Uppsala, Bergen, Odense"
-          className="w-full rounded-md border border-line bg-ink-900 px-3 py-2 text-sm text-white placeholder:text-mute focus:border-white/30 focus:outline-none"
+          className="w-full rounded-md border border-line bg-ink-900 px-3 py-2 text-sm text-fg placeholder:text-mute focus:border-fg/30 focus:outline-none"
         />
         <button
           type="submit"
@@ -224,9 +225,9 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
             <path
               key={z}
               d={d}
-              fill={has ? shade(t(avg[z]!)) : "#24262c"}
+              fill={has ? shade(t(avg[z]!)) : pal.mapNoData}
               fillOpacity={hover === z || selected === z ? 1 : 0.82}
-              stroke={selected === z ? "#ffffff" : "#0b0c0e"}
+              stroke={selected === z ? pal.fg : pal.surface}
               strokeWidth={selected === z ? 1.6 : 0.8}
               onMouseEnter={() => setHover(z)}
               onMouseLeave={() => setHover(null)}
@@ -237,11 +238,11 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
         })}
         {geo.map(({ z, at }) => (
           <g key={`l-${z}`} transform={`translate(${at[0]},${at[1]})`} pointerEvents="none">
-            <text textAnchor="middle" className="fill-white font-mono text-[10px] font-semibold" style={{ paintOrder: "stroke" }} stroke="#0b0c0e" strokeWidth={2.5}>
+            <text textAnchor="middle" className="fill-fg font-mono text-[10px] font-semibold" style={{ paintOrder: "stroke" }} stroke={pal.surface} strokeWidth={2.5}>
               {z}
             </text>
             {avg[z] != null && (
-              <text y={11} textAnchor="middle" className="fill-white/80 font-mono text-[8.5px]" style={{ paintOrder: "stroke" }} stroke="#0b0c0e" strokeWidth={2.5}>
+              <text y={11} textAnchor="middle" className="fill-fg/80 font-mono text-[8.5px]" style={{ paintOrder: "stroke" }} stroke={pal.surface} strokeWidth={2.5}>
                 {eur(money.conv(avg[z]!), 0)}
               </text>
             )}
@@ -249,8 +250,8 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
         ))}
         {pinXY && (
           <g transform={`translate(${pinXY[0]},${pinXY[1]})`} pointerEvents="none">
-            <circle r={16} fill="none" stroke="#ffffff" strokeOpacity={0.55} strokeWidth={1.2} strokeDasharray="3 3" />
-            <circle r={4} fill="#ffffff" stroke="#0b0c0e" strokeWidth={1.5} />
+            <circle r={16} fill="none" stroke={pal.fg} strokeOpacity={0.55} strokeWidth={1.2} strokeDasharray="3 3" />
+            <circle r={4} fill={pal.fg} stroke={pal.surface} strokeWidth={1.5} />
           </g>
         )}
       </svg>
@@ -268,15 +269,15 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
         ) : pin.zone && pinAvg != null ? (
           <>
             <div className="text-soft">
-              <span className="text-white">{pin.name}</span> is in <span className="font-mono font-semibold text-white">{pin.zone}</span>
+              <span className="text-fg">{pin.name}</span> is in <span className="font-mono font-semibold text-fg">{pin.zone}</span>
             </div>
             <div className="mt-0.5 font-mono text-xs text-mute">
-              tomorrow avg <span className="text-white">{eur(money.conv(pinAvg), money.digits)}</span> {money.label} · hourly
+              tomorrow avg <span className="text-fg">{eur(money.conv(pinAvg), money.digits)}</span> {money.label} · hourly
               80% bands span {eur(money.conv(pinLow!), 0)}–{eur(money.conv(pinHigh!), 0)}
             </div>
           </>
         ) : pin.zone ? (
-          <p className="text-soft"><span className="text-white">{pin.name}</span> is in {pin.zone} (no forecast yet).</p>
+          <p className="text-soft"><span className="text-fg">{pin.name}</span> is in {pin.zone} (no forecast yet).</p>
         ) : (
           <p className="text-mute"><span className="text-soft">{pin.name}</span> is outside the Nordic bidding zones.</p>
         )}

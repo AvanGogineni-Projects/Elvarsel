@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,8 @@ from elvarsel.features import build
 from elvarsel.models.train import evaluate, load_all
 
 REPORT_PATH = Path("docs/backtest-results.md")
+# Served by the API's /v1/backtest; anchored to the repo, not the working directory.
+JSON_PATH = Path(__file__).resolve().parents[3] / "docs" / "backtest-results.json"
 
 
 def evaluate_all(
@@ -79,6 +82,26 @@ def write_report(summary: pd.DataFrame, *, path: Path = REPORT_PATH, n_splits: i
     return path
 
 
+def write_json(summary: pd.DataFrame, *, path: Path = JSON_PATH, n_splits: int = 13, test_days: int = 7) -> Path:
+    """Machine-readable twin of the markdown table, for the dashboard."""
+    body = {
+        "generated": dt.date.today().isoformat(),
+        "weeks": n_splits * test_days // 7,
+        "baseline": "naive-24 (same hour the previous day)",
+        "unit": "EUR/MWh",
+        "zones": {
+            r["zone"]: {
+                "model_mae": round(float(r["model_mae"]), 2),
+                "baseline_mae": round(float(r["baseline_mae"]), 2),
+                "improvement_pct": round(float(r["mae_improvement_pct"]), 1),
+            }
+            for _, r in summary.iterrows()
+        },
+    }
+    path.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="elvarsel.models.report")
     p.add_argument("--n-splits", type=int, default=13)
@@ -88,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = evaluate_all(n_splits=args.n_splits, test_days=args.test_days, track=not args.no_track)
     path = write_report(summary, n_splits=args.n_splits)
+    write_json(summary, n_splits=args.n_splits, test_days=args.test_days)
     print(summary.to_string(index=False))
     print(f"\nwrote {path}")
     return 0

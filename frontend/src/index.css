@@ -2,36 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens (RGB triplets so Tailwind's /opacity modifiers work).
+   Background: an aurora of two contrasting hues, teal and violet, warmed by
+   amber, violet's complement and the "expensive" end of the map scale. */
 :root {
+  color-scheme: light;
+  --ink-900: 246 247 251;
+  --ink-800: 255 255 255;
+  --ink-700: 238 240 245;
+  --ink-600: 226 229 236;
+  --fg: 20 24 33;
+  --soft: 45 51 64;
+  --mute: 91 96 112;
+  --line: 15 23 42;
+  --line-alpha: 0.09;
+  --warn: 180 83 9;
+  --ok: 21 128 61;
+  --card-alpha: 0.72;
+  --teal: 20 184 166;
+  --violet: 139 92 246;
+  --amber: 245 158 11;
+  --glow-teal: 0.22;
+  --glow-violet: 0.2;
+  --glow-amber: 0.2;
+}
+
+.dark {
   color-scheme: dark;
+  --ink-900: 10 11 16;
+  --ink-800: 20 21 27;
+  --ink-700: 28 29 36;
+  --ink-600: 36 38 46;
+  --fg: 236 238 241;
+  --soft: 212 214 219;
+  --mute: 138 141 150;
+  --line: 255 255 255;
+  --line-alpha: 0.08;
+  --warn: 245 180 74;
+  --ok: 74 222 128;
+  --card-alpha: 0.6;
+  --glow-teal: 0.26;
+  --glow-violet: 0.28;
+  --glow-amber: 0.14;
 }
 
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
-  background: #0b0c0e;
-  color: #eceef1;
+  color: rgb(var(--fg));
+  background-color: rgb(var(--ink-900));
+  background-image:
+    radial-gradient(60rem 42rem at -5% -10%, rgb(var(--teal) / var(--glow-teal)), transparent 62%),
+    radial-gradient(56rem 40rem at 105% 0%, rgb(var(--violet) / var(--glow-violet)), transparent 60%),
+    radial-gradient(52rem 34rem at 50% 115%, rgb(var(--amber) / var(--glow-amber)), transparent 62%);
+  background-attachment: fixed;
   font-family: Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
-/* Thin, quiet scrollbars to match the dark shell. */
+/* Frosted cards: the aurora shows through, text stays legible. */
+.card {
+  background-color: rgb(var(--ink-800) / var(--card-alpha));
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: rgb(var(--fg) / 0.15) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgb(var(--fg) / 0.12);
   border-radius: 999px;
 }
 

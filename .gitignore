@@ -225,3 +225,6 @@ data/
 # MLflow local tracking
 mlruns/
 mlflow.db
+
+# Personal global CLAUDE.md draft (belongs in ~/.claude/, not this repo)
+my-global-CLAUDE.md

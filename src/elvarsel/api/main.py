@@ -8,11 +8,15 @@ registry; the HTTP contract stays the same.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from elvarsel import __version__, config, monitoring
 from elvarsel.models import forecast as fc
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Elvarsel", version=__version__)
 
@@ -53,8 +57,8 @@ def forecast(zone: str = Query(..., description="SE1..SE4")) -> dict:
     # Best-effort: persist for drift monitoring; never fail serving on a log error.
     try:
         monitoring.log_forecast(zone, as_of, version, points)
-    except Exception:  # noqa: BLE001 — logging must not break the forecast
-        pass
+    except Exception:  # logging must not break the forecast
+        log.warning("forecast logging failed for %s", zone, exc_info=True)
     return {
         "zone": zone,
         "model_version": version,

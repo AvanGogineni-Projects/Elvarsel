@@ -17,11 +17,16 @@ export default {
         soft: "rgb(var(--soft) / <alpha-value>)",
         warn: "rgb(var(--warn) / <alpha-value>)",
         ok: "rgb(var(--ok) / <alpha-value>)",
+        signal: "rgb(var(--signal) / <alpha-value>)",
+        accent: "rgb(var(--accent) / <alpha-value>)",
+        paper: "rgb(var(--paper) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular", "monospace"],
+        sans: ["Archivo", "system-ui", "sans-serif"],
+        mono: ["'IBM Plex Mono'", "ui-monospace", "SFMono-Regular", "monospace"],
       },
+      // Print ledger: square corners everywhere (dots stay round via rounded-full).
+      borderRadius: { none: "0", DEFAULT: "0", sm: "0", md: "0", lg: "0", xl: "0", full: "9999px" },
     },
   },
   plugins: [],

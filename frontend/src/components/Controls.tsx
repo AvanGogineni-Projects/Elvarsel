@@ -25,16 +25,16 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="card flex rounded-md border border-line p-0.5">
-      {options.map((o) => (
+    <div role="radiogroup" aria-label={label} className="flex border border-line">
+      {options.map((o, i) => (
         <button
           key={o.value}
           role="radio"
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`rounded px-2.5 py-1 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-fg/30 ${
-            o.value === value ? "bg-ink-600 text-fg" : "text-mute hover:text-soft"
-          }`}
+          className={`caps px-2.5 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
+            i ? "border-l border-line" : ""
+          } ${o.value === value ? "bg-ink-600 on-active" : "text-mute hover:text-fg"}`}
         >
           {o.label}
         </button>
@@ -72,7 +72,7 @@ export default function Controls(p: Props) {
           ]}
         />
       </div>
-      {p.fxDate && <span className="text-[11px] text-mute">ECB rate {p.fxDate}</span>}
+      {p.fxDate && <span className="caps text-mute">ECB rate {p.fxDate}</span>}
     </div>
   );
 }

@@ -183,18 +183,18 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
           id="place"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Find your town, e.g. Uppsala, Bergen, Odense"
-          className="w-full rounded-md border border-line bg-ink-900 px-3 py-2 text-sm text-fg placeholder:text-mute focus:border-fg/30 focus:outline-none"
+          placeholder="Find a town: Uppsala, Bergen…"
+          className="w-full border-0 border-b-2 border-line bg-transparent px-0 py-2 pr-20 font-mono text-sm text-fg placeholder:text-mute focus:border-signal focus:outline-none"
         />
         <button
           type="submit"
           disabled={searching}
-          className="absolute right-1 top-1 rounded px-2.5 py-1 text-xs text-soft hover:bg-ink-700 disabled:opacity-50"
+          className="caps absolute right-0 top-1.5 border border-line px-2 py-1 text-fg hover:bg-ink-600 hover:on-active disabled:opacity-50"
         >
           {searching ? "…" : "Search"}
         </button>
         {results && (
-          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-line bg-ink-800 text-sm shadow-lg">
+          <ul className="absolute z-10 mt-1 w-full border border-line bg-ink-800 text-sm">
             {results.length ? (
               results.map((p) => (
                 <li key={p.id}>
@@ -227,8 +227,8 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
               d={d}
               fill={has ? shade(t(avg[z]!)) : pal.mapNoData}
               fillOpacity={hover === z || selected === z ? 1 : 0.82}
-              stroke={selected === z ? pal.fg : pal.surface}
-              strokeWidth={selected === z ? 1.6 : 0.8}
+              stroke={selected === z ? pal.signal : pal.fg}
+              strokeWidth={selected === z ? 2 : 0.6}
               onMouseEnter={() => setHover(z)}
               onMouseLeave={() => setHover(null)}
             >
@@ -238,7 +238,7 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
         })}
         {geo.map(({ z, at }) => (
           <g key={`l-${z}`} transform={`translate(${at[0]},${at[1]})`} pointerEvents="none">
-            <text textAnchor="middle" className="fill-fg font-mono text-[10px] font-semibold" style={{ paintOrder: "stroke" }} stroke={pal.surface} strokeWidth={2.5}>
+            <text textAnchor="middle" className="fill-fg font-mono text-[10px] font-semibold uppercase" style={{ paintOrder: "stroke" }} stroke={pal.surface} strokeWidth={2.5}>
               {z}
             </text>
             {avg[z] != null && (
@@ -250,20 +250,20 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
         ))}
         {pinXY && (
           <g transform={`translate(${pinXY[0]},${pinXY[1]})`} pointerEvents="none">
-            <circle r={16} fill="none" stroke={pal.fg} strokeOpacity={0.55} strokeWidth={1.2} strokeDasharray="3 3" />
-            <circle r={4} fill={pal.fg} stroke={pal.surface} strokeWidth={1.5} />
+            <circle r={16} fill="none" stroke={pal.signal} strokeOpacity={0.55} strokeWidth={1.2} strokeDasharray="3 3" />
+            <circle r={4} fill={pal.signal} stroke={pal.surface} strokeWidth={1.5} />
           </g>
         )}
       </svg>
 
-      <div className="flex items-center gap-2 text-[11px] text-mute">
+      <div className="caps flex items-center gap-2 text-mute">
         <span className="font-mono">{eur(money.conv(lo), 0)}</span>
-        <span className="h-2 flex-1 rounded-sm" style={{ background: `linear-gradient(90deg, ${shade(0)}, ${shade(1)})` }} />
+        <span className="h-2 flex-1 border border-line" style={{ background: `linear-gradient(90deg, ${shade(0)}, ${shade(1)})` }} />
         <span className="font-mono">{eur(money.conv(hi), 0)}</span>
         <span>{money.label} · avg tomorrow</span>
       </div>
 
-      <div className="min-h-[64px] rounded-md border border-line bg-ink-900/60 px-3 py-2.5 text-sm" aria-live="polite">
+      <div className="min-h-[64px] border-l-[3px] border-signal py-1 pl-3 text-sm" aria-live="polite">
         {!pin ? (
           <p className="text-mute">Search a town or click the map. Every place in a price area pays that area's price.</p>
         ) : pin.zone && pinAvg != null ? (

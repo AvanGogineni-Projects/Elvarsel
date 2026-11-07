@@ -1,12 +1,12 @@
-import { useMemo, useState } from "react";
-import { COUNTRY_NAME, zoneColor, type Zone } from "./api";
+import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { COUNTRY_NAME, type Zone } from "./api";
 import Controls from "./components/Controls";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
 import ZoneMap from "./components/ZoneMap";
 import ZoneTile from "./components/ZoneTile";
 import { eur, money as makeMoney, relTime, stats, type Unit } from "./lib";
-import { useTheme } from "./theme";
+import { STRIPES, useTheme, type Flag } from "./theme";
 import { useDashboard, useZoneHistory, type Health } from "./useDashboard";
 
 const STATUS: Record<Health, { label: string; dot: string }> = {
@@ -15,9 +15,33 @@ const STATUS: Record<Health, { label: string; dot: string }> = {
   loading: { label: "Connecting…", dot: "bg-mute" },
 };
 
+// Numbered editorial section: a heavy rule, a caps title, then content. Module-level so
+// re-renders keep children mounted (a component defined inside App would remount them).
+const Section = ({ n, title, note, children }: { n: string; title: string; note?: string; children: ReactNode }) => (
+  <section className="mt-10 border-t-2 border-line pt-3">
+    <div className="mb-5 flex flex-wrap items-baseline justify-between gap-2">
+      <h2 className="caps text-fg">
+        <span className="text-signal">{n}</span> — {title}
+      </h2>
+      {note && <span className="caps hidden text-mute sm:inline">{note}</span>}
+    </div>
+    {children}
+  </section>
+);
+
+
+// The flag read across its horizontal centre line, as the masthead rule.
+const FlagStripe = ({ flag }: { flag: Flag }) => (
+  <div className="flex h-2 border-y border-line" role="img" aria-label={`${flag === "ALL" ? "Nordic" : flag} flag colours`}>
+    {STRIPES[flag].map(([c, w], i) => (
+      <span key={i} style={{ background: c, width: `${w * 100}%` }} className="transition-colors duration-300" />
+    ))}
+  </div>
+);
+
 export default function App() {
   const { zones, fx, forecasts, accuracy, backtest, health, lastUpdated, loading, refresh } = useDashboard();
-  const { theme, toggle: toggleTheme } = useTheme();
+  const { theme, toggle: toggleTheme, flag, setFlag } = useTheme();
   const bt = (z: Zone) => {
     const r = backtest?.zones[z];
     return r && backtest ? { ...r, weeks: backtest.weeks } : undefined;
@@ -28,6 +52,8 @@ export default function App() {
   const [hidden, setHidden] = useState<Set<Zone>>(new Set());
   const [selectedRaw, setSelected] = useState<Zone>("SE3");
   const [days, setDays] = useState(30);
+  // The selected country's flag colours theme the whole page (All Nordic = paper/ink/red).
+  useLayoutEffect(() => setFlag(country as Flag), [country, setFlag]);
 
   const countries = [...new Set(zones.map((z) => z.country))];
   const visible = zones.filter((z) => country === "ALL" || z.country === country);
@@ -69,22 +95,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-10">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+      <div className="mx-auto max-w-6xl px-4 pb-10 sm:px-8">
+        <header className="flex flex-wrap items-end justify-between gap-3 pb-2 pt-6">
           <div className="flex items-baseline gap-3">
-            <span className="text-lg font-semibold tracking-tight text-fg">Elvarsel</span>
-            <span className="text-sm text-mute">Nordic day-ahead price forecasts</span>
+            <span className="text-2xl font-extrabold uppercase tracking-[-0.03em] text-fg">Elvarsel</span>
+            <span className="caps hidden text-mute sm:inline">Nordic day-ahead prices · forecast desk</span>
           </div>
-          <div className="flex items-center gap-3 text-xs text-mute">
+          <div className="caps flex items-center gap-3 text-mute">
             <span className="flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${STATUS[health].dot}`} />
-              <span className="text-soft">{STATUS[health].label}</span>
+              <span className={`h-1.5 w-1.5 rounded-full ${health === "live" ? "bg-fg" : "bg-signal"}`} />
+              <span className="text-fg">{STATUS[health].label}</span>
             </span>
-            {lastUpdated && <span>updated {relTime(new Date(lastUpdated).toISOString())}</span>}
+            {lastUpdated && <span className="hidden sm:inline">updated {relTime(new Date(lastUpdated).toISOString())}</span>}
             <button
               onClick={refresh}
               disabled={loading}
-              className="rounded-md border border-line px-2.5 py-1 text-soft transition-colors hover:bg-ink-700 disabled:opacity-50"
+              className="caps border border-line px-2 py-1 text-fg transition-colors hover:bg-ink-600 hover:on-active disabled:opacity-50"
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
@@ -92,39 +118,34 @@ export default function App() {
               onClick={toggleTheme}
               aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               title={theme === "dark" ? "Light mode" : "Dark mode"}
-              className="grid h-[26px] w-[26px] place-items-center rounded-md border border-line text-soft transition-colors hover:bg-ink-700"
+              className="caps border border-line px-2 py-1 text-fg transition-colors hover:bg-ink-600 hover:on-active"
             >
-              {theme === "dark" ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-                </svg>
-              )}
+              {theme === "dark" ? "Paper" : "Ink"}
             </button>
           </div>
         </header>
+        <FlagStripe flag={flag} />
 
-        <section className="mt-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
-            {day ? `Forecast for ${day}` : "Loading forecast…"}
-          </h1>
+        <section className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end">
+          <div>
+            <div className="caps text-signal">Day-ahead forecast</div>
+            <h1 className="mt-2 text-[44px] font-extrabold leading-[0.95] tracking-[-0.035em] text-fg sm:text-[64px]">
+              {day ?? "Loading…"}
+            </h1>
+          </div>
           {byAvg.length > 1 && (
-            <p className="mt-2 text-sm text-mute">
-              Across {scope}: cheapest{" "}
-              <span style={{ color: zoneColor(byAvg[0].z) }}>{byAvg[0].z}</span>{" "}
-              <span className="font-mono text-soft">{eur(money.conv(byAvg[0].avg), money.digits)}</span>, priciest{" "}
-              <span style={{ color: zoneColor(byAvg[byAvg.length - 1].z) }}>{byAvg[byAvg.length - 1].z}</span>{" "}
-              <span className="font-mono text-soft">{eur(money.conv(byAvg[byAvg.length - 1].avg), money.digits)}</span>{" "}
-              {money.label} average.
+            <p className="border-l-2 border-line pl-4 text-[15px] leading-relaxed text-soft">
+              Across {scope}, tomorrow's average runs from{" "}
+              <span className="font-mono font-medium text-fg">{byAvg[0].z} {eur(money.conv(byAvg[0].avg), money.digits)}</span> to{" "}
+              <span className="font-mono font-medium text-signal">
+                {byAvg[byAvg.length - 1].z} {eur(money.conv(byAvg[byAvg.length - 1].avg), money.digits)}
+              </span>{" "}
+              {money.label}.
             </p>
           )}
         </section>
 
-        <div className="mt-5">
+        <div className="mt-8">
           <Controls
             countries={countries}
             country={country}
@@ -138,13 +159,7 @@ export default function App() {
           />
         </div>
 
-        <section className="card mt-4 rounded-lg border border-line p-4 sm:p-5">
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h2 className="text-sm font-medium text-soft">
-              Next-day hourly forecast <span className="font-normal text-mute">· {money.label}</span>
-            </h2>
-            <span className="hidden text-xs text-mute sm:inline">click a line or tile for detail · chips show/hide zones</span>
-          </div>
+        <Section n="01" title={`Next-day hourly forecast · ${money.label}`} note="click a line or a zone for detail">
           {ready && codes.length ? (
             <OverviewChart
               zones={codes}
@@ -156,47 +171,44 @@ export default function App() {
               onToggle={toggle}
             />
           ) : ready ? (
-            <div className="grid h-[330px] place-items-center text-sm text-mute">No zone in this filter has data yet.</div>
+            <div className="caps grid h-[330px] place-items-center text-mute">No zone in this filter has data yet</div>
           ) : (
-            <div className="h-[330px] animate-pulse rounded-md bg-ink-700/50" />
+            <div className="h-[330px] animate-pulse bg-fg/[0.04]" />
           )}
-        </section>
+        </Section>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <section className="card rounded-lg border border-line p-4 sm:p-5">
-          <h2 className="mb-3 text-sm font-medium text-soft">
-            Price areas <span className="font-normal text-mute">· where is my price set?</span>
-          </h2>
-          <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} />
-        </section>
-        <section className="grid content-start grid-cols-2 gap-3 sm:grid-cols-3">
-          {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
-            ready && z && !forecasts[z.code] ? (
-              <div key={z.code} className="flex flex-col rounded-lg border border-dashed border-line p-4 text-xs text-mute">
-                <span className="font-mono text-sm font-semibold" style={{ color: zoneColor(z.code) }}>{z.code}</span>
-                <span>{z.city}</span>
-                <span className="mt-auto pt-6">No data yet: backfill pending</span>
-              </div>
-            ) : ready && z ? (
-              <ZoneTile
-                key={z.code}
-                zone={z}
-                forecast={forecasts[z.code]!}
-                accuracy={accuracy[z.code] ?? null}
-                backtest={bt(z.code)}
-                money={money}
-                selected={z.code === selected}
-                onSelect={() => setSelected(z.code)}
-              />
-            ) : (
-              <div key={z?.code ?? i} className="card h-[160px] animate-pulse rounded-lg border border-line" />
-            )
-          )}
-        </section>
-        </div>
+        <Section n="02" title="Price areas · where is my price set?">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+            <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} />
+            <div className="grid content-start grid-cols-2 border-l border-t border-line sm:grid-cols-3">
+              {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
+                ready && z && !forecasts[z.code] ? (
+                  <div key={z.code} className="flex flex-col border-b border-r border-line p-4">
+                    <span className="caps font-semibold text-fg">{z.code}</span>
+                    <span className="caps text-mute">{z.city}</span>
+                    <span className="caps mt-auto pt-6 text-mute">No data yet: backfill pending</span>
+                  </div>
+                ) : ready && z ? (
+                  <ZoneTile
+                    key={z.code}
+                    zone={z}
+                    forecast={forecasts[z.code]!}
+                    accuracy={accuracy[z.code] ?? null}
+                    backtest={bt(z.code)}
+                    money={money}
+                    selected={z.code === selected}
+                    onSelect={() => setSelected(z.code)}
+                  />
+                ) : (
+                  <div key={z?.code ?? i} className="h-[200px] animate-pulse border-b border-r border-line bg-fg/[0.03]" />
+                )
+              )}
+            </div>
+          </div>
+        </Section>
 
         {ready && selectedInfo && forecasts[selected] && (
-          <div className="mt-4">
+          <Section n="03" title={`${selectedInfo.code} · ${selectedInfo.city} in detail`}>
             <ZoneDetail
               zone={selectedInfo}
               forecast={forecasts[selected]!}
@@ -208,12 +220,12 @@ export default function App() {
               money={money}
               backtest={bt(selected)}
             />
-          </div>
+          </Section>
         )}
 
-        <footer className="mt-10 text-xs text-mute">
-          One LightGBM model for all 12 zones · shaded band = 80% range · prices settle in EUR; local currency via ECB reference rate · refreshes every 60 s
-          · times in your local zone
+        <footer className="caps mt-12 flex flex-wrap justify-between gap-2 border-t border-line pt-3 text-mute">
+          <span>One LightGBM model for all 12 zones · shaded band = 80% range</span>
+          <span>Prices settle in EUR · local currency via ECB · times in your zone</span>
         </footer>
       </div>
     </div>

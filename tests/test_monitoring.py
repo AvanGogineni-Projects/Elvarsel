@@ -126,3 +126,19 @@ def test_log_forecast_stores_the_range(monkeypatch):
     assert monitoring.log_forecast("SE3", "2026-11-08T00:00:00+00:00", "lgbm-nordic-x", points) == 1
     row = written["df"].iloc[0]
     assert (row["low"], row["high"], row["price_eur_mwh"]) == (40.0, 60.0, 50.0)
+
+
+def test_read_paths_treat_a_missing_table_as_nothing_logged(monkeypatch):
+    from sqlalchemy.exc import ProgrammingError
+
+    def missing(*a, **k):
+        raise ProgrammingError("select", {}, Exception('relation "forecast_log" does not exist'))
+
+    monkeypatch.setattr(monitoring.storage, "enabled", lambda: True)
+    monkeypatch.setattr(monitoring.storage, "_engine", lambda: None)
+    monkeypatch.setattr(monitoring.pd, "read_sql", missing)
+    # No DDL on read paths: ensure_table must not be called.
+    monkeypatch.setattr(monitoring, "ensure_table", lambda: (_ for _ in ()).throw(AssertionError("DDL on a read")))
+    assert monitoring.latest_forecast("SE3", "lgbm-nordic") is None
+    assert monitoring.latest_versions("lgbm-nordic") == {}
+    assert monitoring._read_log("SE3", 7).empty

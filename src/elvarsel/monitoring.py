@@ -142,14 +142,13 @@ def latest_forecast(zone: str, model_family: str) -> dict | None:
         return None
     from sqlalchemy import text
 
-    ensure_table()
     sql = text(
         "select as_of, target_time, model_version, price_eur_mwh, low, high from forecast_log "
         "where zone = :z and as_of = (select max(as_of) from forecast_log "
         "where zone = :z and model_version like :fam) and model_version like :fam "
         "order by target_time"
     )
-    df = pd.read_sql(sql, storage._engine(), params={"z": zone, "fam": f"{model_family}-%"})
+    df = _read_or_empty(sql, {"z": zone, "fam": f"{model_family}-%"})
     return forecast_body(zone, df)
 
 
@@ -179,13 +178,24 @@ def latest_versions(model_family: str) -> dict[str, str]:
         return {}
     from sqlalchemy import text
 
-    ensure_table()
     sql = text(
         "select distinct on (zone) zone, model_version from forecast_log "
         "where model_version like :fam order by zone, as_of desc"
     )
-    df = pd.read_sql(sql, storage._engine(), params={"fam": f"{model_family}-%"})
-    return dict(zip(df["zone"], df["model_version"], strict=True))
+    df = _read_or_empty(sql, {"fam": f"{model_family}-%"})
+    return dict(zip(df["zone"], df["model_version"], strict=True)) if not df.empty else {}
+
+
+def _read_or_empty(sql, params: dict) -> pd.DataFrame:
+    """Read paths never run DDL (it takes locks and connections per request); the
+    daily job creates/migrates the table. Before its first run there is no table:
+    treat that as "nothing logged yet"."""
+    from sqlalchemy.exc import ProgrammingError
+
+    try:
+        return pd.read_sql(sql, storage._engine(), params=params)
+    except ProgrammingError:  # undefined table / column before the first daily run
+        return pd.DataFrame()
 
 
 def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
@@ -197,7 +207,6 @@ def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
     base = {"zone": zone, "window_days": days, "unit": "EUR/MWh", "model_family": model_family}
     if not storage.enabled():
         return {**base, "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": [], "baseline_mae": None}
-    ensure_table()
     log = _read_log(zone, days)
     if model_family:
         log = log[log["model_version"].str.startswith(f"{model_family}-")]
@@ -214,4 +223,5 @@ def _read_log(zone: str, days: int) -> pd.DataFrame:
         "select as_of, target_time, model_version, price_eur_mwh from forecast_log "
         "where zone = :z and as_of >= now() - make_interval(days => :d)"
     )
-    return pd.read_sql(sql, storage._engine(), params={"z": zone, "d": days})
+    df = _read_or_empty(sql, {"z": zone, "d": days})
+    return df if not df.empty else pd.DataFrame(columns=["as_of", "target_time", "model_version", "price_eur_mwh"])

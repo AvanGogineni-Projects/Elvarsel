@@ -58,16 +58,24 @@ def _engine():
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL not set")
+    # No server-side prepared statements: Supabase's transaction pooler (port
+    # 6543, the right one for serverless/Vercel) can't keep them across
+    # transactions. Harmless on the session pooler.
+    connect_args = {"prepare_threshold": None}
+    if os.getenv("VERCEL"):
+        # Serverless: many short-lived instances each holding a pool would exhaust
+        # Supabase's client cap (EMAXCONNSESSION 500s on concurrent dashboard
+        # loads). Hold nothing: borrow a pooler connection per request.
+        from sqlalchemy.pool import NullPool
+
+        return create_engine(url, poolclass=NullPool, connect_args=connect_args)
     return create_engine(
         url,
         pool_size=3,
         max_overflow=2,  # <= 5 server sessions, safe headroom under the 15 cap
         pool_pre_ping=True,
         pool_recycle=1800,  # drop idle conns the pooler would reap
-        # No server-side prepared statements: Supabase's transaction pooler (port
-        # 6543, the right one for serverless/Vercel) can't keep them across
-        # transactions. Harmless on the session pooler.
-        connect_args={"prepare_threshold": None},
+        connect_args=connect_args,
     )
 
 

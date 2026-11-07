@@ -12,6 +12,7 @@ import { useDashboard, useZoneHistory, type Health } from "./useDashboard";
 const STATUS: Record<Health, { label: string; dot: string }> = {
   live: { label: "Live", dot: "bg-ok" },
   mock: { label: "Backend offline · demo data", dot: "bg-warn" },
+  offline: { label: "Data unavailable", dot: "bg-signal" },
   loading: { label: "Connecting…", dot: "bg-mute" },
 };
 
@@ -95,7 +96,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <div className="mx-auto max-w-6xl px-4 pb-10 sm:px-8">
+      <div className="w-full px-4 pb-10 sm:px-6 lg:px-10">
         <header className="flex flex-wrap items-end justify-between gap-3 pb-2 pt-6">
           <div className="flex items-baseline gap-3">
             <span className="text-2xl font-extrabold uppercase tracking-[-0.03em] text-fg">Elvarsel</span>
@@ -126,101 +127,122 @@ export default function App() {
         </header>
         <FlagStripe flag={flag} />
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end">
-          <div>
-            <div className="caps text-signal">Day-ahead forecast</div>
-            <h1 className="mt-2 text-[44px] font-extrabold leading-[0.95] tracking-[-0.035em] text-fg sm:text-[64px]">
-              {day ?? "Loading…"}
+        {health === "offline" ? (
+          <section className="mt-10 border-l-[3px] border-signal py-2 pl-5" role="alert">
+            <div className="caps text-signal">Data unavailable</div>
+            <h1 className="mt-2 text-[40px] font-extrabold leading-[0.95] tracking-[-0.035em] text-fg sm:text-[56px]">
+              The forecast service isn't responding.
             </h1>
-          </div>
-          {byAvg.length > 1 && (
-            <p className="border-l-2 border-line pl-4 text-[15px] leading-relaxed text-soft">
-              Across {scope}, tomorrow's average runs from{" "}
-              <span className="font-mono font-medium text-fg">{byAvg[0].z} {eur(money.conv(byAvg[0].avg), money.digits)}</span> to{" "}
-              <span className="font-mono font-medium text-signal">
-                {byAvg[byAvg.length - 1].z} {eur(money.conv(byAvg[byAvg.length - 1].avg), money.digits)}
-              </span>{" "}
-              {money.label}.
+            <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-soft">
+              No prices are shown rather than stale or made-up ones. The page retries every minute on its own.
             </p>
-          )}
-        </section>
-
-        <div className="mt-8">
-          <Controls
-            countries={countries}
-            country={country}
-            onCountry={pickCountry}
-            currencies={currencies}
-            currency={money.currency}
-            onCurrency={setCurrency}
-            unit={unit}
-            onUnit={setUnit}
-            fxDate={money.currency !== "EUR" ? fx?.date ?? null : null}
-          />
-        </div>
-
-        <Section n="01" title={`Next-day hourly forecast · ${money.label}`} note="click a line or a zone for detail">
-          {ready && codes.length ? (
-            <OverviewChart
-              zones={codes}
-              hidden={hidden}
-              forecasts={forecasts as Record<Zone, NonNullable<(typeof forecasts)[Zone]>>}
-              selected={selected}
-              money={money}
-              onSelect={setSelected}
-              onToggle={toggle}
-            />
-          ) : ready ? (
-            <div className="caps grid h-[330px] place-items-center text-mute">No zone in this filter has data yet</div>
-          ) : (
-            <div className="h-[330px] animate-pulse bg-fg/[0.04]" />
-          )}
-        </Section>
-
-        <Section n="02" title="Price areas · where is my price set?">
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-            <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} />
-            <div className="grid content-start grid-cols-2 border-l border-t border-line sm:grid-cols-3">
-              {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
-                ready && z && !forecasts[z.code] ? (
-                  <div key={z.code} className="flex flex-col border-b border-r border-line p-4">
-                    <span className="caps font-semibold text-fg">{z.code}</span>
-                    <span className="caps text-mute">{z.city}</span>
-                    <span className="caps mt-auto pt-6 text-mute">No data yet: backfill pending</span>
-                  </div>
-                ) : ready && z ? (
-                  <ZoneTile
-                    key={z.code}
-                    zone={z}
-                    forecast={forecasts[z.code]!}
-                    accuracy={accuracy[z.code] ?? null}
-                    backtest={bt(z.code)}
-                    money={money}
-                    selected={z.code === selected}
-                    onSelect={() => setSelected(z.code)}
-                  />
-                ) : (
-                  <div key={z?.code ?? i} className="h-[200px] animate-pulse border-b border-r border-line bg-fg/[0.03]" />
-                )
-              )}
+            <button
+              onClick={refresh}
+              disabled={loading}
+              className="caps mt-6 border border-line px-3 py-2 text-fg transition-colors hover:bg-ink-600 hover:on-active disabled:opacity-50"
+            >
+              {loading ? "Retrying…" : "Retry now"}
+            </button>
+          </section>
+        ) : (
+          <>
+          <section className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end">
+            <div>
+              <div className="caps text-signal">Day-ahead forecast</div>
+              <h1 className="mt-2 text-[44px] font-extrabold leading-[0.95] tracking-[-0.035em] text-fg sm:text-[64px]">
+                {day ?? "Loading…"}
+              </h1>
             </div>
-          </div>
-        </Section>
+            {byAvg.length > 1 && (
+              <p className="border-l-2 border-line pl-4 text-[15px] leading-relaxed text-soft">
+                Across {scope}, tomorrow's average runs from{" "}
+                <span className="font-mono font-medium text-fg">{byAvg[0].z} {eur(money.conv(byAvg[0].avg), money.digits)}</span> to{" "}
+                <span className="font-mono font-medium text-signal">
+                  {byAvg[byAvg.length - 1].z} {eur(money.conv(byAvg[byAvg.length - 1].avg), money.digits)}
+                </span>{" "}
+                {money.label}.
+              </p>
+            )}
+          </section>
 
-        {ready && selectedInfo && forecasts[selected] && (
-          <Section n="03" title={`${selectedInfo.code} · ${selectedInfo.city} in detail`}>
-            <ZoneDetail
-              zone={selectedInfo}
-              forecast={forecasts[selected]!}
-              prices={history.prices}
-              accuracy={history.acc}
-              loading={history.loading}
-              days={days}
-              onDays={setDays}
-              money={money}
-              backtest={bt(selected)}
+          <div className="mt-8">
+            <Controls
+              countries={countries}
+              country={country}
+              onCountry={pickCountry}
+              currencies={currencies}
+              currency={money.currency}
+              onCurrency={setCurrency}
+              unit={unit}
+              onUnit={setUnit}
+              fxDate={money.currency !== "EUR" ? fx?.date ?? null : null}
             />
+          </div>
+
+          <Section n="01" title={`Next-day hourly forecast · ${money.label}`} note="click a line or a zone for detail">
+            {ready && codes.length ? (
+              <OverviewChart
+                zones={codes}
+                hidden={hidden}
+                forecasts={forecasts as Record<Zone, NonNullable<(typeof forecasts)[Zone]>>}
+                selected={selected}
+                money={money}
+                onSelect={setSelected}
+                onToggle={toggle}
+              />
+            ) : ready ? (
+              <div className="caps grid h-[330px] place-items-center text-mute">No zone in this filter has data yet</div>
+            ) : (
+              <div className="h-[330px] animate-pulse bg-fg/[0.04]" />
+            )}
           </Section>
+
+          <Section n="02" title="Price areas · where is my price set?">
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+              <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} />
+              <div className="grid content-start grid-cols-2 border-l border-t border-line sm:grid-cols-3 2xl:grid-cols-4">
+                {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
+                  ready && z && !forecasts[z.code] ? (
+                    <div key={z.code} className="flex flex-col border-b border-r border-line p-4">
+                      <span className="caps font-semibold text-fg">{z.code}</span>
+                      <span className="caps text-mute">{z.city}</span>
+                      <span className="caps mt-auto pt-6 text-mute">No data yet: backfill pending</span>
+                    </div>
+                  ) : ready && z ? (
+                    <ZoneTile
+                      key={z.code}
+                      zone={z}
+                      forecast={forecasts[z.code]!}
+                      accuracy={accuracy[z.code] ?? null}
+                      backtest={bt(z.code)}
+                      money={money}
+                      selected={z.code === selected}
+                      onSelect={() => setSelected(z.code)}
+                    />
+                  ) : (
+                    <div key={z?.code ?? i} className="h-[200px] animate-pulse border-b border-r border-line bg-fg/[0.03]" />
+                  )
+                )}
+              </div>
+            </div>
+          </Section>
+
+          {ready && selectedInfo && forecasts[selected] && (
+            <Section n="03" title={`${selectedInfo.code} · ${selectedInfo.city} in detail`}>
+              <ZoneDetail
+                zone={selectedInfo}
+                forecast={forecasts[selected]!}
+                prices={history.prices}
+                accuracy={history.acc}
+                loading={history.loading}
+                days={days}
+                onDays={setDays}
+                money={money}
+                backtest={bt(selected)}
+              />
+            </Section>
+          )}
+          </>
         )}
 
         <footer className="caps mt-12 flex flex-wrap justify-between gap-2 border-t border-line pt-3 text-mute">

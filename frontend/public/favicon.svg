@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Elvarsel: the Nordic cross (shared by every Nordic flag) in signal red on ink -->
+  <rect width="32" height="32" fill="#141414"/>
+  <rect x="9" y="0" width="6" height="32" fill="#d7261e"/>
+  <rect x="0" y="13" width="32" height="6" fill="#d7261e"/>
+</svg>

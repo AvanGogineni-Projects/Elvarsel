@@ -1,9 +1,9 @@
 # Elvarsel — Forecast Monitor (frontend)
 
-A dark, animated monitoring dashboard for the Elvarsel electricity-price
-forecasting service. Shows next-day hourly spot-price forecasts for the four
-Swedish bidding zones (SE1 north → SE4 south), the live production model
-version per zone, and the forecast `as_of` time.
+Overview + detail dashboard for the Elvarsel electricity-price forecasting
+service. One shared chart compares next-day hourly forecasts across the four
+Swedish bidding zones (SE1 north → SE4 south); pick a zone for its forecast vs
+actual price, live accuracy, and error by hour.
 
 Vite + React + TypeScript · Tailwind CSS · framer-motion · Recharts.
 
@@ -43,27 +43,28 @@ npm run preview    # serve the production build
 The dashboard calls:
 
 - `GET /v1/forecast?zone=SE1..SE4` — 24 hourly points for the next day
-- `GET /v1/status` — service + per-zone model versions
-- `GET /v1/accuracy?zone=SE1..SE4&days=7` — live model health (MAE / RMSE /
-  bias over matured forecasts). Each card shows a model-health row: live MAE +
-  bias once forecasts have matured (24h+ and actuals landed), otherwise
-  "Awaiting actuals · N forecasts logged".
+- `GET /v1/accuracy?zone=SE1..SE4&days=7` — live model health over matured
+  forecasts: MAE / RMSE / bias, `by_horizon` (error by hour), and `points`
+  (forecast vs actual per hour). Until forecasts mature (24h+ and actuals
+  landed) the zone shows "Awaiting actuals".
+
+A zone is flagged **Skewed** when |bias| > ½ MAE — its errors lean one way
+(systematic over/under-forecast) rather than averaging out.
 
 If a zone's forecast request fails (backend not running), that zone falls back
 to **deterministic mock data** (a realistic Nordic double-peak daily curve) so
-the UI still renders. The status strip then shows an amber **"Mock data"**
-indicator instead of the green **"Live backend"** one. The grid refreshes every
-60 seconds.
+the UI still renders, and the header shows "Backend offline · demo data".
+Data refreshes every 60 seconds.
 
-## Design notes
+## Layout
 
-Intended to look high-end but calm: deep navy palette, per-zone accent colours,
-a faint dot-grid + slow drifting colour blooms (CSS transforms, no video/WebGL),
-staggered card reveals, animated value counters, and smooth chart draw-in.
-Motion is tasteful and subtle — this is a monitoring surface, not a marketing
-page.
+1. **Header** — live/offline status, last update, refresh.
+2. **Headline** — delivery day, cheapest vs priciest zone.
+3. **Overview chart** — all four zones on one y-axis so levels are comparable;
+   the selected zone is emphasised. Click a line to select it.
+4. **Zone tiles** — average, range, and model health per zone; click to select.
+5. **Zone detail** — forecast vs actual, MAE/RMSE, bias in plain words, error by
+   hour of the delivery day, model version.
 
-> The brief asked for the AnimatedWebs plugin. Its MCP server
-> (`plugin:animatedwebs:animatedwebs`) requires `/mcp` OAuth that could not be
-> started in this session, so the UI uses the brief's sanctioned fallback stack
-> (Tailwind + framer-motion + Recharts) with a hand-built dark design system.
+Neutral graphite palette so the four zone colours carry the meaning; no
+decorative motion beyond chart draw-in and number counters.

@@ -1,4 +1,11 @@
-import type { Forecast } from "./api";
+import type { Accuracy, Forecast } from "./api";
+
+// Live model health from matured forecasts. "skewed" = |bias| > half the MAE:
+// errors lean one way (systematic over/under-forecast), not random noise.
+export function health(a: Accuracy | null): "ok" | "skewed" | "waiting" {
+  if (!a || a.mae == null) return "waiting";
+  return Math.abs(a.bias ?? 0) > 0.5 * a.mae ? "skewed" : "ok";
+}
 
 export function eur(n: number, digits = 1): string {
   return n.toLocaleString("en-GB", {

@@ -2,12 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchAccuracy,
   fetchForecast,
-  fetchStatus,
   mockForecast,
   ZONES,
   type Accuracy,
   type Forecast,
-  type Status,
   type Zone,
 } from "./api";
 
@@ -16,7 +14,6 @@ export type Health = "live" | "mock" | "loading";
 export interface DashboardState {
   forecasts: Record<Zone, Forecast | null>;
   accuracy: Record<Zone, Accuracy | null>;
-  status: Status | null;
   health: Health;
   lastUpdated: number | null;
   loading: boolean;
@@ -38,7 +35,6 @@ export function useDashboard(): DashboardState {
     SE3: null,
     SE4: null,
   });
-  const [status, setStatus] = useState<Status | null>(null);
   const [health, setHealth] = useState<Health>("loading");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,20 +65,6 @@ export function useDashboard(): DashboardState {
     const next = {} as Record<Zone, Forecast>;
     for (const [zone, f] of results) next[zone] = f;
 
-    try {
-      setStatus(await fetchStatus(ac.signal));
-    } catch {
-      setStatus({
-        service: "elvarsel",
-        version: "0.0.1",
-        zones: [...ZONES],
-        models: Object.fromEntries(
-          results.map(([z, f]) => [z, f.model_version])
-        ),
-      });
-    }
-
-    if (ac.signal.aborted) return;
     setForecasts(next);
     setHealth(anyLive ? "live" : "mock");
     setLastUpdated(Date.now());
@@ -116,5 +98,5 @@ export function useDashboard(): DashboardState {
     };
   }, [load]);
 
-  return { forecasts, accuracy, status, health, lastUpdated, loading, refresh: load };
+  return { forecasts, accuracy, health, lastUpdated, loading, refresh: load };
 }

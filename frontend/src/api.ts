@@ -15,10 +15,10 @@ export const ZONE_META: Record<
   Zone,
   { city: string; region: string; accent: string }
 > = {
-  SE1: { city: "Luleå", region: "North", accent: "#38bdf8" },
-  SE2: { city: "Sundsvall", region: "North-central", accent: "#34d399" },
-  SE3: { city: "Stockholm", region: "Central", accent: "#a78bfa" },
-  SE4: { city: "Malmö", region: "South", accent: "#fb7185" },
+  SE1: { city: "Luleå", region: "North", accent: "#7cc4fa" },
+  SE2: { city: "Sundsvall", region: "North-central", accent: "#5fd4a4" },
+  SE3: { city: "Stockholm", region: "Central", accent: "#b9a3fb" },
+  SE4: { city: "Malmö", region: "South", accent: "#f7869a" },
 };
 
 export interface ForecastPoint {
@@ -52,6 +52,7 @@ export interface Accuracy {
   rmse: number | null;
   bias: number | null; // +ve = model over-forecasts
   by_horizon: { h: number; mae: number; n: number }[];
+  points?: { time: string; forecast: number; actual: number }[]; // matured forecast vs actual, time-ordered
 }
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {

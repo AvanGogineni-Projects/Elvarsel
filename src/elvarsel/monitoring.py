@@ -1,6 +1,7 @@
 """Forecast logging + live accuracy — the monitoring half of the serving layer.
 
-Every forecast the API serves is persisted to `forecast_log`. Once the forecast
+The daily job persists every zone's forecast (point + 80% range) to
+`forecast_log`; the API serves the latest one from there. Once the forecast
 horizon has passed and the realized day-ahead prices land in `raw_price`, we can
 score what the live model actually predicted: rolling MAE/RMSE/bias per zone and
 error-by-horizon (how error grows 1h..24h ahead). This is drift detection — a
@@ -26,10 +27,17 @@ create table if not exists forecast_log (
     target_time timestamptz not null,
     model_version text not null,
     price_eur_mwh double precision not null,
+    low double precision,
+    high double precision,
     created_at timestamptz not null default now(),
     primary key (zone, as_of, target_time)
 )
 """
+# The range columns arrived after the table existed; add them in place if missing.
+_MIGRATE = (
+    "alter table forecast_log add column if not exists low double precision",
+    "alter table forecast_log add column if not exists high double precision",
+)
 
 
 def ensure_table() -> None:
@@ -37,6 +45,8 @@ def ensure_table() -> None:
 
     with storage._engine().begin() as con:
         con.execute(text(_DDL))
+        for stmt in _MIGRATE:
+            con.execute(text(stmt))
 
 
 def log_forecast(zone: str, as_of: str, model_version: str, points: list[dict]) -> int:
@@ -47,7 +57,7 @@ def log_forecast(zone: str, as_of: str, model_version: str, points: list[dict]) 
     """
     if not storage.enabled() or not points:
         return 0
-    df = pd.DataFrame(points)  # time, price_eur_mwh
+    df = pd.DataFrame(points)  # time, price_eur_mwh[, low, high]
     df = pd.DataFrame(
         {
             "zone": zone,
@@ -55,6 +65,7 @@ def log_forecast(zone: str, as_of: str, model_version: str, points: list[dict]) 
             "target_time": pd.to_datetime(df["time"], utc=True),
             "model_version": model_version,
             "price_eur_mwh": df["price_eur_mwh"].astype("float64"),
+            **{c: df[c].astype("float64") for c in ("low", "high") if c in df},
         }
     )
     ensure_table()
@@ -124,6 +135,59 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
     }
 
 
+def latest_forecast(zone: str, model_family: str) -> dict | None:
+    """The newest logged forecast run for a zone from `model_family`, in the API's
+    response shape, or None if there is none (or the DB is off)."""
+    if not storage.enabled():
+        return None
+    from sqlalchemy import text
+
+    ensure_table()
+    sql = text(
+        "select as_of, target_time, model_version, price_eur_mwh, low, high from forecast_log "
+        "where zone = :z and as_of = (select max(as_of) from forecast_log "
+        "where zone = :z and model_version like :fam) and model_version like :fam "
+        "order by target_time"
+    )
+    df = pd.read_sql(sql, storage._engine(), params={"z": zone, "fam": f"{model_family}-%"})
+    return forecast_body(zone, df)
+
+
+def forecast_body(zone: str, df: pd.DataFrame) -> dict | None:
+    """Pure: logged rows of one run -> {zone, model_version, as_of, unit, forecast}."""
+    if df.empty:
+        return None
+
+    def r(v):  # rows logged before the range columns existed have no low/high
+        return None if pd.isna(v) else round(float(v), 2)
+
+    return {
+        "zone": zone,
+        "model_version": str(df["model_version"].iloc[0]),
+        "as_of": pd.Timestamp(df["as_of"].iloc[0]).tz_convert("UTC").isoformat(),
+        "unit": "EUR/MWh",
+        "forecast": [
+            {"time": pd.Timestamp(t).tz_convert("UTC").isoformat(), "price_eur_mwh": r(p), "low": r(lo), "high": r(hi)}
+            for t, p, lo, hi in zip(df["target_time"], df["price_eur_mwh"], df["low"], df["high"], strict=True)
+        ],
+    }
+
+
+def latest_versions(model_family: str) -> dict[str, str]:
+    """{zone: newest model_version} for the family, for /v1/status."""
+    if not storage.enabled():
+        return {}
+    from sqlalchemy import text
+
+    ensure_table()
+    sql = text(
+        "select distinct on (zone) zone, model_version from forecast_log "
+        "where model_version like :fam order by zone, as_of desc"
+    )
+    df = pd.read_sql(sql, storage._engine(), params={"fam": f"{model_family}-%"})
+    return dict(zip(df["zone"], df["model_version"], strict=True))
+
+
 def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
     """Live accuracy for a zone over the last `days` of logged forecasts.
 
@@ -137,7 +201,9 @@ def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
     log = _read_log(zone, days)
     if model_family:
         log = log[log["model_version"].str.startswith(f"{model_family}-")]
-    realized = build.hourly_price(build.load_prices(zone))
+    # Only the window being scored (+1 day for the naive baseline, +1 slack).
+    since = pd.Timestamp.now(tz="UTC").floor("D") - pd.Timedelta(days=days + 2)
+    realized = build.hourly_price(build.load_prices(zone, since=since))
     return {**base, **score(log, realized)}
 
 

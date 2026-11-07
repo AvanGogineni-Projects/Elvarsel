@@ -111,7 +111,18 @@ def test_accuracy_scores_only_the_current_model_family(monkeypatch):
     monkeypatch.setattr(monitoring.storage, "enabled", lambda: True)
     monkeypatch.setattr(monitoring, "ensure_table", lambda: None)
     monkeypatch.setattr(monitoring, "_read_log", lambda z, d: log)
-    monkeypatch.setattr(monitoring.build, "load_prices", lambda z: pd.DataFrame())
+    monkeypatch.setattr(monitoring.build, "load_prices", lambda z, since=None: pd.DataFrame())
     monkeypatch.setattr(monitoring.build, "hourly_price", lambda raw: realized)
     s = monitoring.accuracy("SE3", 7, model_family="lgbm-nordic")
     assert s["n_logged"] == 1 and s["mae"] == pytest.approx(2.0)  # the retired per-zone row is ignored
+
+
+def test_log_forecast_stores_the_range(monkeypatch):
+    written = {}
+    monkeypatch.setattr(monitoring.storage, "enabled", lambda: True)
+    monkeypatch.setattr(monitoring, "ensure_table", lambda: None)
+    monkeypatch.setattr(monitoring.storage, "upsert", lambda df, table: written.setdefault("df", df) is not None and len(df))
+    points = [{"time": "2026-11-08T00:00:00+00:00", "price_eur_mwh": 50.0, "low": 40.0, "high": 60.0}]
+    assert monitoring.log_forecast("SE3", "2026-11-08T00:00:00+00:00", "lgbm-nordic-x", points) == 1
+    row = written["df"].iloc[0]
+    assert (row["low"], row["high"], row["price_eur_mwh"]) == (40.0, 60.0, 50.0)

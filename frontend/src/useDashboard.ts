@@ -83,8 +83,7 @@ export function useDashboard(): DashboardState {
     if (ac.signal.aborted) return;
     setForecasts(fc);
     setHealth(meta ? "live" : "mock");
-    // A static snapshot is as fresh as its generation time, not the page load.
-    setLastUpdated(meta?.generated_at ? Date.parse(meta.generated_at) : Date.now());
+    setLastUpdated(Date.now());
     setLoading(false);
 
     if (meta) {

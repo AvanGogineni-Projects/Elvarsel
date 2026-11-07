@@ -1,17 +1,10 @@
+# Serving: everything the read-only API needs. This is all Vercel installs, so it
+# stays small (no LightGBM / scikit-learn / MLflow / pyarrow at runtime).
 fastapi>=0.162
 uvicorn[standard]>=0.54
 httpx>=0.28
 pandas>=3.1
-pyarrow>=26
 python-dotenv>=1.2
-entsoe-py>=0.8
-lightgbm>=4.7
 holidays>=0.108
-scikit-learn>=1.9
-mlflow>=3.18
 sqlalchemy>=2
 psycopg[binary]>=3
-
-# dev
-pytest>=9
-respx>=0.23

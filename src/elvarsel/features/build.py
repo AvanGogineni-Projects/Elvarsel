@@ -44,24 +44,28 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
 
 # ---- loaders (read the raw parquet store) --------------------------------
 
-def load_prices(zone: str) -> pd.DataFrame:
-    """Raw prices with time_start + eur_per_kwh: Elpris for Swedish zones, ENTSO-E elsewhere."""
+PRICE_METRIC = "day_ahead_price_eur_mwh"
+
+
+def load_prices(zone: str, since: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Raw prices with time_start + eur_per_kwh: Elpris for Swedish zones, ENTSO-E elsewhere.
+    `since` limits the database read (the parquet fallback returns everything)."""
     if zone in config.ELPRIS_ZONES:
         if storage.enabled():
-            return storage.read_zone("raw_price", zone)
+            return storage.read_zone("raw_price", zone, since=since)
         return _read("elpris", zone, ["time_start", "eur_per_kwh"])
-    return entsoe_prices(load_entsoe(zone))
+    return entsoe_prices(load_entsoe(zone, since=since, metric=PRICE_METRIC))
 
 
 def entsoe_prices(entsoe_raw: pd.DataFrame) -> pd.DataFrame:
     """ENTSO-E day-ahead price rows (EUR/MWh) in the Elpris shape (time_start, eur_per_kwh)."""
-    p = entsoe_raw[entsoe_raw["metric"] == "day_ahead_price_eur_mwh"]
+    p = entsoe_raw[entsoe_raw["metric"] == PRICE_METRIC]
     return pd.DataFrame({"time_start": p["time_start"], "eur_per_kwh": p["value"] / 1000.0})
 
 
-def load_entsoe(zone: str) -> pd.DataFrame:
+def load_entsoe(zone: str, since: pd.Timestamp | None = None, metric: str | None = None) -> pd.DataFrame:
     if storage.enabled():
-        return storage.read_zone("raw_entsoe", zone)
+        return storage.read_zone("raw_entsoe", zone, since=since, metric=metric)
     return _read("entsoe", zone, ["time_start", "metric", "value"])
 
 

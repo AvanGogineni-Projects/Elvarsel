@@ -228,3 +228,6 @@ mlflow.db
 
 # Personal global CLAUDE.md draft (belongs in ~/.claude/, not this repo)
 my-global-CLAUDE.md
+
+# macOS Finder metadata
+.DS_Store

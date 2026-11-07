@@ -10,6 +10,7 @@ drop-in for the parquet readers.
 from __future__ import annotations
 
 import os
+import uuid
 from functools import lru_cache
 
 import pandas as pd
@@ -67,7 +68,8 @@ def upsert(df: pd.DataFrame, table: str) -> int:
     pk = PK[table]
     collist = ",".join(f'"{c}"' for c in cols)
     updates = ",".join(f'"{c}"=excluded."{c}"' for c in cols if c not in pk)
-    stage = f"_stage_{table}"
+    # Unique per call: concurrent upserts (12 zones logging forecasts at once) must not share a stage table.
+    stage = f"_stage_{table}_{uuid.uuid4().hex[:12]}"
     with _engine().begin() as con:
         df.to_sql(stage, con, if_exists="replace", index=False)
         con.execute(

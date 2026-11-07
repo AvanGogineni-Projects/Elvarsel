@@ -4,8 +4,8 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What Elvarsel is
 
-Short-horizon electricity-price forecasting for Sweden's four bidding zones
-(SE1 north → SE4 south), wrapped in a full MLOps lifecycle: ingestion →
+Short-horizon electricity-price forecasting for the 12 Nordic (Nord Pool)
+bidding zones — SE1–4, NO1–5, DK1–2, FI — wrapped in a full MLOps lifecycle: ingestion →
 point-in-time feature store → model + backtest → serving API → animated
 monitoring dashboard → accuracy/drift tracking. Prices are in **EUR/MWh**.
 
@@ -26,6 +26,7 @@ out. Don't present a stale or feature-branch copy as confirmed behaviour.
 ```
 src/elvarsel/
   ingest/      elpris.py, entsoe_client.py, smhi.py, run.py  (CLI: python -m elvarsel.ingest.run)
+               backfill.py (history straight to DB: python -m elvarsel.ingest.backfill)
   features/    build.py (point-in-time feature table), backtest.py (rolling-origin)
   models/      baseline.py (seasonal-naive), train.py, forecast.py (prod predict),
                metrics.py (mae/rmse/mape), report.py, evaluate.py
@@ -51,6 +52,7 @@ uvicorn elvarsel.api.main:app --reload     # :8000, CORS open
 # Ingest
 python -m elvarsel.ingest.run --source all
 python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-05
+python -m elvarsel.ingest.backfill --years 2      # history -> DB, hourly, resumable
 
 # Lint + test  (CI runs these on Python 3.12 for every PR)
 ruff check src tests
@@ -76,6 +78,14 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
   exhausts it (`EMAXCONNSESSION` 500s).
 - **Tables:** `raw_price`, `raw_entsoe`, `raw_weather`, `forecast_log`. Writes
   go through `storage.upsert` (idempotent on each table's PK).
+- **Zones** live in `config.ZONES` (country, currency, city/coords, ENTSO-E
+  area) — the single source of truth. **Price source:** Swedish zones use
+  Elpris (`raw_price`); all others use ENTSO-E's day-ahead price in
+  `raw_entsoe` (`features.build.load_prices` routes). Prices are stored and
+  served in **EUR**; local currency is display-only.
+- **Backfilled history is hourly** (native 15-min only from the daily feed);
+  the backfill only fills time before each zone's earliest row, newest month
+  first, so it never mixes resolutions and resumes after interruption.
 
 ## API
 
@@ -123,7 +133,8 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 
 ## Roadmap (next)
 
-1. Ingest writes to the DB directly (currently parquet + manual sync).
+1. Daily ingest writes to the DB directly (backfill already does; daily is
+   still parquet + manual sync).
 2. Model registry (MLflow) in place of lazy in-process training.
 3. Log forecasts from a scheduled job (not only on serve).
 4. Scheduled retrain/ingest; deploy (Dockerfile targets Python 3.12).

@@ -23,6 +23,7 @@ LightGBM handles that natively. The columns activate as history builds up.
 """
 from __future__ import annotations
 
+import holidays
 import numpy as np
 import pandas as pd
 
@@ -62,6 +63,19 @@ def load_entsoe(zone: str) -> pd.DataFrame:
     if storage.enabled():
         return storage.read_zone("raw_entsoe", zone)
     return _read("entsoe", zone, ["time_start", "metric", "value"])
+
+
+def load_nwp(zone: str) -> pd.DataFrame:
+    """Open-Meteo NWP rows for the zone plus the system-wide NORDIC wind."""
+    from elvarsel.ingest.openmeteo import NORDIC
+
+    cols = ["zone", "metric", "time_start", "value"]
+    if storage.enabled():
+        try:
+            return pd.concat([storage.read_zone("raw_nwp", z) for z in (zone, NORDIC)], ignore_index=True)
+        except Exception:  # noqa: BLE001 - table not created yet (pre-backfill) -> no NWP features
+            return pd.DataFrame(columns=cols)
+    return pd.concat([_read("nwp", z, cols) for z in (zone, NORDIC)], ignore_index=True)
 
 
 def load_weather(zone: str) -> pd.DataFrame:
@@ -115,6 +129,7 @@ def build_features(
     *,
     entsoe_raw: pd.DataFrame | None = None,
     weather_raw: pd.DataFrame | None = None,
+    nwp_raw: pd.DataFrame | None = None,
     horizon: int = 0,
 ) -> pd.DataFrame:
     """Supervised table: target + features, indexed by UTC hour.
@@ -138,6 +153,11 @@ def build_features(
     df["month"] = local.month
     df["is_weekend"] = (local.day_of_week >= 5).astype(int)
     day = local.tz_localize(None).normalize()  # naive local date: +1 day stays midnight across DST
+    if zone in config.ZONES and len(day):
+        # Public holidays price like Sundays; the day after one makes "yesterday" a misleading lag.
+        cal = holidays.country_holidays(config.ZONES[zone].country, years=range(day.min().year, day.max().year + 1))
+        df["holiday"] = day.isin(pd.DatetimeIndex(list(cal))).astype(int)
+        df["holiday_d1"] = (day - pd.Timedelta(days=1)).isin(pd.DatetimeIndex(list(cal))).astype(int)
 
     for h in PRICE_LAGS:
         df[f"lag_{h}h"] = df["price_eur_mwh"].shift(h)
@@ -159,9 +179,35 @@ def build_features(
     if weather_raw is not None and not weather_raw.empty:
         _add_weather(df, weather_raw)
 
+    if nwp_raw is not None and not nwp_raw.empty:
+        _add_nwp(df, nwp_raw, zone, day)
+
     df["zone"] = zone
     df = df.dropna(subset=[f"lag_{h}h" for h in PRICE_LAGS])
     return df[df["target"].notna() | (df.index > last_known)]
+
+
+def load_features(zone: str, horizon: int = 0) -> pd.DataFrame:
+    """Feature table for one zone from the store (training rows, + `horizon` future rows).
+
+    SMHI weather is not used: it has no history (only the live ~84h forecast), so
+    Open-Meteo's archived NWP replaces it as the weather input.
+    """
+    entsoe, nwp = load_entsoe(zone), load_nwp(zone)
+    return build_features(
+        load_prices(zone),
+        zone,
+        entsoe_raw=entsoe if not entsoe.empty else None,
+        nwp_raw=nwp if not nwp.empty else None,
+        horizon=horizon,
+    )
+
+
+def stack(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """All zones in one table for a single model; `zone_code` lets it learn zone differences."""
+    df = pd.concat(frames.values())
+    df["zone_code"] = pd.Categorical(df["zone"], categories=list(config.ZONES))
+    return df
 
 
 def _prev_day(daily: pd.DataFrame, day: pd.DatetimeIndex, k: int) -> pd.DataFrame:
@@ -178,6 +224,23 @@ def _add_fundamentals(df: pd.DataFrame, entsoe_raw: pd.DataFrame, day: pd.Dateti
     df["load_fc_day_mean"] = load_fc.groupby(day).transform("mean").to_numpy()
     # Change vs the same hour's forecast a day earlier (both published pre-gate).
     df["load_fc_vs_d1"] = load_fc - load_fc.shift(24)
+
+
+def _add_nwp(df: pd.DataFrame, nwp_raw: pd.DataFrame, zone: str, day: pd.DatetimeIndex) -> None:
+    """Open-Meteo wind/temperature forecast for the target hour, issued >= 48h ahead
+    (see ingest.openmeteo), plus the system-wide Nordic wind."""
+    from elvarsel.ingest.openmeteo import NORDIC, TEMP, WIND
+
+    def series(z: str, metric: str) -> pd.Series:
+        r = nwp_raw[(nwp_raw["zone"] == z) & (nwp_raw["metric"] == metric)]
+        s = r.set_index(pd.to_datetime(r["time_start"], utc=True))["value"].sort_index()
+        return s[~s.index.duplicated(keep="last")]
+
+    wind, temp, nordic = series(zone, WIND), series(zone, TEMP), series(NORDIC, WIND)
+    for name, s in (("nwp_wind", wind), ("nwp_temp", temp), ("nordic_wind", nordic)):
+        df[name] = s.reindex(df.index)
+        df[f"{name}_day_mean"] = df[name].groupby(day).transform("mean").to_numpy()
+    df["nwp_wind_vs_d1"] = df["nwp_wind"] - wind.shift(24, freq="1h").reindex(df.index)
 
 
 def _add_weather(df: pd.DataFrame, weather_raw: pd.DataFrame) -> None:

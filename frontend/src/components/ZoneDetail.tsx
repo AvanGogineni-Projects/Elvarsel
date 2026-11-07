@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -44,11 +45,21 @@ const dayHour = (iso: string) =>
 const dayOnly = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 // Actual price over the window, the logged model forecast where one exists, and the
-// naive baseline (actual price one day earlier) for every hour.
-function series(prices: Prices | null, accuracy: Accuracy | null, money: Money) {
+// naive baseline (actual price one day earlier) for every hour, then tomorrow's
+// forecast with its 80% range after the last actual.
+type Row = {
+  time: string;
+  actual?: number;
+  forecast?: number | null;
+  baseline?: number | null;
+  next?: number;
+  band?: [number, number];
+};
+
+function series(prices: Prices | null, accuracy: Accuracy | null, next: Forecast, money: Money): Row[] {
   const actual = new Map((prices?.points ?? []).map((p) => [Date.parse(p.time), p.price_eur_mwh]));
   const forecast = new Map((accuracy?.points ?? []).map((p) => [Date.parse(p.time), p.forecast]));
-  return [...actual.keys()].map((t) => {
+  const past = [...actual.keys()].map((t) => {
     const base = actual.get(t - DAY);
     const f = forecast.get(t);
     return {
@@ -56,8 +67,17 @@ function series(prices: Prices | null, accuracy: Accuracy | null, money: Money) 
       actual: money.conv(actual.get(t)!),
       forecast: f == null ? null : money.conv(f),
       baseline: base == null ? null : money.conv(base),
-    };
+    } as Row;
   });
+  const last = past.length ? Date.parse(past[past.length - 1].time) : -Infinity;
+  const ahead = next.forecast
+    .filter((p) => Date.parse(p.time) > last)
+    .map((p) => ({
+      time: p.time,
+      next: money.conv(p.price_eur_mwh),
+      band: p.low != null && p.high != null ? ([money.conv(p.low), money.conv(p.high)] as [number, number]) : undefined,
+    }));
+  return [...past, ...ahead];
 }
 
 function Metric({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: string }) {
@@ -74,7 +94,7 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
   const [showBase, setShowBase] = useState(true);
   const color = zoneColor(zone.code);
   const h = HEALTH_STYLE[health(accuracy)];
-  const data = useMemo(() => series(prices, accuracy, money), [prices, accuracy, money]);
+  const data = useMemo(() => series(prices, accuracy, forecast, money), [prices, accuracy, forecast, money]);
   const scored = accuracy?.mae != null;
   const gain =
     scored && accuracy!.baseline_mae ? (1 - accuracy!.mae! / accuracy!.baseline_mae) * 100 : null;
@@ -129,7 +149,7 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
           <div className={`mt-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
             {data.length ? (
               <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
                   <XAxis
                     dataKey="time"
@@ -151,14 +171,21 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
                   <Tooltip
                     {...TIP}
                     labelFormatter={dayHour}
-                    formatter={(v: number, name: string) => [`${eur(v, money.digits)} ${money.label}`, name]}
+                    formatter={(v: number | [number, number], name: string) => [
+                      Array.isArray(v)
+                        ? `${eur(v[0], money.digits)} – ${eur(v[1], money.digits)} ${money.label}`
+                        : `${eur(v, money.digits)} ${money.label}`,
+                      name,
+                    ]}
                   />
+                  <Area name="Tomorrow 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.18} isAnimationActive={false} />
                   <Line name="Actual" dataKey="actual" type="monotone" stroke="#eceef1" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                   {showBase && (
                     <Line name="Baseline (yesterday)" dataKey="baseline" type="monotone" stroke="#8a8d96" strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
                   )}
                   <Line name="Model forecast" dataKey="forecast" type="monotone" stroke={color} strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
-                </LineChart>
+                  <Line name="Tomorrow" dataKey="next" type="monotone" stroke={color} strokeWidth={2.25} strokeDasharray="5 3" dot={false} isAnimationActive={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             ) : (
               <div className="grid h-[260px] place-items-center rounded-md border border-dashed border-line text-sm text-mute">
@@ -169,6 +196,7 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-[#eceef1]" /> Actual</span>
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: color }} /> Model forecast (logged)</span>
               {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm" style={{ background: color, opacity: 0.25 }} /> Tomorrow · 80% range</span>
             </div>
           </div>
         </div>

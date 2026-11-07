@@ -3,6 +3,7 @@
     python -m elvarsel.ingest.backfill --years 2
     python -m elvarsel.ingest.backfill --zones NO1 DK1 --start 2025-01-01
     python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
+    python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temp (all zones)
 
 Stores hourly means (not native 15-min) to keep the history small; the feature
 builder resamples to hourly anyway. Only fills time *before* the earliest row
@@ -18,7 +19,7 @@ import httpx
 import pandas as pd
 
 from elvarsel import config, storage
-from elvarsel.ingest import elpris, entsoe_client
+from elvarsel.ingest import elpris, entsoe_client, openmeteo
 
 
 def to_hourly(df: pd.DataFrame, keys: list[str], values: list[str]) -> pd.DataFrame:
@@ -94,6 +95,19 @@ def backfill_elpris(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> int:
     return total
 
 
+def backfill_nwp(zones: list[str], start: dt.date, end: dt.date) -> int:
+    """Open-Meteo NWP for every zone in one request each (idempotent), then the NORDIC mean."""
+    frames, total = [], 0
+    for zone in zones:
+        df = openmeteo.fetch(zone, start, end)
+        frames.append(df)
+        total += storage.upsert(df, "raw_nwp")
+        print(f"nwp/{zone}: {len(df)} rows")
+    if set(zones) == set(config.ZONES):  # the system-wide mean needs every zone
+        total += storage.upsert(openmeteo.nordic_mean(frames), "raw_nwp")
+    return total
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="elvarsel.ingest.backfill")
     p.add_argument("--zones", nargs="+", default=list(config.ZONES), choices=list(config.ZONES))
@@ -101,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start", type=dt.date.fromisoformat, default=None, help="overrides --years")
     p.add_argument("--end", type=dt.date.fromisoformat, default=dt.date.today())
     p.add_argument("--fundamentals", action="store_true", help="backfill load/wind/solar forecasts only")
+    p.add_argument("--nwp", action="store_true", help="backfill Open-Meteo wind/temperature only")
     args = p.parse_args(argv)
 
     if not storage.enabled():
@@ -113,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
         else (end - pd.Timedelta(days=round(365 * args.years))).normalize()
     )
 
+    if args.nwp:
+        total = backfill_nwp(args.zones, start.date(), (end + pd.Timedelta(days=2)).date())
+        print(f"done: {total} rows")
+        return 0
     total = 0
     for zone in args.zones:
         if args.fundamentals:

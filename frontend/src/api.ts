@@ -59,6 +59,8 @@ export const FALLBACK_ZONES: ZoneInfo[] = [
 export interface ForecastPoint {
   time: string; // ISO8601
   price_eur_mwh: number;
+  low?: number; // calibrated 80% range from quantile models (absent in demo data)
+  high?: number;
 }
 
 export interface Forecast {

@@ -54,10 +54,15 @@ python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-0
 # Backfill years of history straight into the database (hourly, resumable)
 python -m elvarsel.ingest.backfill --years 2
 python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
+python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temperature
+
+# Daily: ingest -> retrain -> forecast -> log (GitHub Action at 09:15 UTC;
+# needs repo secrets DATABASE_URL and ENTSOE_API_TOKEN)
+python -m elvarsel.daily
 ```
 
-**Model:** LightGBM per zone, beating "same hour yesterday" by 23.6% MAE over a
-13-week walk-forward backtest (all 12 zones). See
+**Model:** one LightGBM model for all 12 zones (wind/temperature forecasts, load forecast, holidays), beating "same hour yesterday" by 33.6% MAE over a
+52-week walk-forward backtest (all 12 zones), with a calibrated 80% range. See
 [docs/model-analysis.md](docs/model-analysis.md) for the data analysis and
 [docs/backtest-results.md](docs/backtest-results.md) for per-zone numbers.
 

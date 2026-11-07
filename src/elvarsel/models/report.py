@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from elvarsel.features import build
-from elvarsel.models.train import _load_zone, evaluate
+from elvarsel.models.train import evaluate, load_all
 
 REPORT_PATH = Path("docs/backtest-results.md")
 
@@ -26,16 +26,14 @@ def evaluate_all(
     test_days: int = 7,
     track: bool = True,
 ) -> pd.DataFrame:
-    zones = zones or list(build.config.ZONES)
+    df = load_all(zones)
+    res = evaluate(df, "nordic", n_splits=n_splits, test_days=test_days, track=track)
     rows = []
-    for z in zones:
-        df = _load_zone(z)
-        res = evaluate(df, z, n_splits=n_splits, test_days=test_days, track=track)
-        m = res["mean"]
+    for z, m in res["by_zone"].items():
         rows.append(
             {
                 "zone": z,
-                "rows": len(df),
+                "rows": int((df["zone"] == z).sum()),
                 "features": len(build.feature_columns(df)),
                 "model_mae": m["model_mae"],
                 "baseline_mae": m["baseline_mae"],
@@ -57,7 +55,7 @@ def write_report(summary: pd.DataFrame, *, path: Path = REPORT_PATH, n_splits: i
         "",
         (
             f"Rolling-origin backtest, {n_splits} weekly splits. "
-            "LightGBM vs naive (same hour the previous day). "
+            "One LightGBM model for all zones vs naive (same hour the previous day). "
             "MAE/RMSE in EUR/MWh; lower is better. MAPE is omitted — Nordic prices reach "
             "zero/negative, which makes percentage error meaningless."
         ),

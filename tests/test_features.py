@@ -106,7 +106,7 @@ def test_weather_absent_leaves_nan_columns():
 def test_zone_without_prices_builds_an_empty_table_not_a_crash():
     empty = pd.DataFrame(columns=["time_start", "eur_per_kwh"])
     df = build.build_features(empty, "FI")
-    assert df.empty  # train_and_forecast turns this into "no data" (API 503) instead of a 500
+    assert df.empty  # train_and_forecast_all drops this zone -> "no data" into "no data" (API 503) instead of a 500
 
 
 def _raw_hourly(values, start="2026-05-01T00:00:00Z") -> pd.DataFrame:
@@ -157,3 +157,14 @@ def test_fundamentals_use_only_the_gate_safe_load_forecast():
     assert (df["load_fc_vs_d1"] == 0.0).all()
     # Wind/solar day-ahead forecasts are published after the 12:00 gate -> never features.
     assert not any("wind" in c or "solar" in c for c in build.feature_columns(df))
+
+
+def test_holiday_flags_use_the_zone_country_and_local_date():
+    raw = _raw_hourly(np.full(14 * 24, 50.0), start="2026-12-15T23:00:00Z")  # local midnight Dec 16
+    df = build.build_features(raw, "SE3")
+    local = df.index.tz_convert("Europe/Stockholm")
+    xmas = df[(local.month == 12) & (local.day == 25)]
+    assert len(xmas) == 24 and (xmas["holiday"] == 1).all()
+    assert (df[(local.month == 12) & (local.day == 28)]["holiday_d1"] == 0).all()
+    assert (df[(local.month == 12) & (local.day == 27)]["holiday_d1"] == 1).all()  # Dec 26 is a SE holiday
+    assert "holiday" in build.feature_columns(df)

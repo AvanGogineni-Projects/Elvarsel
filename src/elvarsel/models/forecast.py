@@ -1,7 +1,6 @@
-"""Production forecasting: train a model on all history, predict the next day.
+"""Production forecasting: one model trained on all zones' history, next-day forecast.
 
-The serving API caches one trained model per zone. The model is a LightGBM fit
-on the full feature table (same features as the backtest). Next-day prediction
+The serving API and the daily job both call `train_and_forecast_all`. Next-day prediction
 builds feature rows for the 24 hours after the last known price with the same
 `build_features` call as training (horizon > 0), so serving can't drift from
 training; their lags all point back into known history.
@@ -11,32 +10,57 @@ from __future__ import annotations
 import pandas as pd
 from lightgbm import LGBMRegressor
 
+from elvarsel import config
 from elvarsel.features import build
 from elvarsel.models.train import LGBM_PARAMS
 
-
-def train_and_forecast(zone: str, *, horizon: int = 24) -> tuple[str, pd.DataFrame]:
-    """One data load per zone: fit on all history, predict the `horizon` hours after
-    the last known price. Returns (version, DataFrame[time, price_eur_mwh])."""
-    df = _features(zone, horizon)
-    hist, future = df[df["target"].notna()], df[df["target"].isna()]
-    if hist.empty or future.empty:
-        raise ValueError(f"no data for {zone}")
-    feats = build.feature_columns(df)
-    model = LGBMRegressor(**LGBM_PARAMS).fit(hist[feats], hist["target"].to_numpy())
-    version = f"lgbm-{zone}-{hist.index.max():%Y%m%dT%H}"
-    return version, pd.DataFrame({"time": future.index, "price_eur_mwh": model.predict(future[feats])})
+# Calibrated, not nominal: q10/q90 models covered only 67% of actual prices out of
+# sample (upward spikes escaped the top). Model quantiles 4%/96% cover 80% in the
+# walk-forward backtest, so `low`/`high` form an honest 80% range.
+QUANTILES = (0.04, 0.96)
 
 
-def _features(zone: str, horizon: int = 0) -> pd.DataFrame:
-    """Training rows (horizon=0) or training + future rows — one code path, no train/serve skew."""
-    price = build.load_prices(zone)
-    entsoe = build.load_entsoe(zone)
-    weather = build.load_weather(zone)
-    return build.build_features(
-        price,
-        zone,
-        entsoe_raw=entsoe if not entsoe.empty else None,
-        weather_raw=weather if not weather.empty else None,
-        horizon=horizon,
+def train_and_forecast_all(*, horizon: int = 24) -> tuple[str, dict[str, pd.DataFrame]]:
+    """One model for all zones: load each zone once, fit on the stacked history,
+    predict each zone's `horizon` hours after its last known price.
+
+    Returns (version, {zone: DataFrame[time, price_eur_mwh, low, high]}); zones with
+    no data are absent. Pooling 12 zones beat 12 separate models in every zone
+    (52-week backtest, docs/model-analysis.md).
+    """
+    frames = {z: df for z in config.ZONES if not (df := build.load_features(z, horizon)).empty}
+    if not frames:
+        raise ValueError("no data for any zone")
+    allf = build.stack(frames)
+    hist, future = allf[allf["target"].notna()], allf[allf["target"].isna()]
+    feats = build.feature_columns(allf)
+    x, y, xf = hist[feats], hist["target"].to_numpy(), future[feats]
+    point = LGBMRegressor(**LGBM_PARAMS).fit(x, y).predict(xf)
+    lo, hi = (
+        LGBMRegressor(**{**LGBM_PARAMS, "objective": "quantile", "alpha": q}).fit(x, y).predict(xf)
+        for q in QUANTILES
     )
+    pred = pd.DataFrame(
+        {"zone": future["zone"].to_numpy(), "time": future.index, "price_eur_mwh": point, "low": lo, "high": hi}
+    )
+    version = f"lgbm-nordic-{hist.index.max():%Y%m%dT%H}"
+    return version, {
+        z: order_band(g.drop(columns="zone").reset_index(drop=True)) for z, g in pred.groupby("zone", sort=False)
+    }
+
+
+def to_points(df: pd.DataFrame) -> tuple[str, list[dict]]:
+    """(as_of, JSON points) for a forecast frame — shared by the API and the daily job."""
+    points = [
+        {"time": t.isoformat(), "price_eur_mwh": round(float(p), 2), "low": round(float(lo), 2),
+         "high": round(float(hi), 2)}
+        for t, p, lo, hi in zip(df["time"], df["price_eur_mwh"], df["low"], df["high"], strict=True)
+    ]
+    return df["time"].iloc[0].isoformat(), points
+
+
+def order_band(df: pd.DataFrame) -> pd.DataFrame:
+    """Separately fitted quantile models can cross; keep low <= point <= high."""
+    df["low"] = df[["low", "price_eur_mwh"]].min(axis=1)
+    df["high"] = df[["high", "price_eur_mwh"]].max(axis=1)
+    return df

@@ -28,11 +28,10 @@ def test_prices_returns_last_n_days_hourly(monkeypatch):
 
 
 def test_forecast_503_when_zone_has_no_data(monkeypatch):
-    def no_data(zone):
-        raise ValueError(f"no data for {zone}")
-
-    main._CACHE.pop("DK1", None)
-    monkeypatch.setattr(main.fc, "train_and_forecast", no_data)
+    frame = pd.DataFrame({"time": pd.date_range("2026-11-08", periods=24, freq="1h", tz="UTC"),
+                          "price_eur_mwh": 1.0, "low": 0.0, "high": 2.0})
+    main._CACHE.clear()
+    monkeypatch.setattr(main.fc, "train_and_forecast_all", lambda: ("v", {"SE3": frame}))
     r = TestClient(main.app).get("/v1/forecast", params={"zone": "DK1"})
     assert r.status_code == 503
     assert "no data" in r.json()["detail"]

@@ -1,16 +1,19 @@
 """FastAPI service: health + versioned forecast API.
 
-Models are trained lazily per zone on first request, and the next-day forecast
-is cached in-process with them: one history load per zone per process, not per
-request (a zone's history is ~110k rows; reloading it on every dashboard refresh
-exhausted the DB pool). A later phase swaps this for a model registry and a
-scheduled job; the HTTP contract stays the same.
+One model covers all zones. It is trained in a background thread at startup and
+refreshed hourly; the next-day forecasts for every zone are cached with it, so a
+request never reloads history (~110k rows per zone; reloading per dashboard
+refresh exhausted the DB pool). A lock makes concurrent requests share one
+training run. A model registry replaces this later; the HTTP contract stays the same.
 
     uvicorn elvarsel.api.main:app --reload
 """
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from contextlib import asynccontextmanager
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
@@ -22,7 +25,14 @@ from elvarsel.models import forecast as fc
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Elvarsel", version=__version__)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Warm the cache so the dashboard's first load doesn't wait on training.
+    threading.Thread(target=_refresh_quietly, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Elvarsel", version=__version__, lifespan=_lifespan)
 
 # Dashboard (Vite dev server / deployed) calls this cross-origin.
 app.add_middleware(
@@ -32,17 +42,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# zone -> (model version, next-day forecast frame)
-_CACHE: dict[str, tuple[str, pd.DataFrame]] = {}
+# version, {zone: next-day forecast frame}, monotonic load time
+_CACHE: dict[str, tuple[str, dict[str, pd.DataFrame], float]] = {}
+_LOCK = threading.Lock()
+CACHE_TTL_S = 3600  # pick up the daily job's fresh data within an hour, without reloading per request
+
+
+def _forecasts() -> tuple[str, dict[str, pd.DataFrame]]:
+    with _LOCK:  # concurrent requests wait for one training run instead of starting twelve
+        hit = _CACHE.get("nordic")
+        if hit is None or time.monotonic() - hit[2] > CACHE_TTL_S:
+            _CACHE["nordic"] = (*fc.train_and_forecast_all(), time.monotonic())
+        version, frames, _ = _CACHE["nordic"]
+    return version, frames
+
+
+def _refresh_quietly() -> None:
+    try:
+        _forecasts()
+    except Exception:  # startup warm-up is best-effort; requests retry and surface errors
+        log.warning("model warm-up failed", exc_info=True)
 
 
 def _model(zone: str) -> tuple[str, pd.DataFrame]:
-    if zone not in _CACHE:
-        try:
-            _CACHE[zone] = fc.train_and_forecast(zone)
-        except ValueError as e:  # no price history yet (e.g. a zone not backfilled)
-            raise HTTPException(status_code=503, detail=str(e)) from e
-    return _CACHE[zone]
+    try:
+        version, frames = _forecasts()
+    except ValueError as e:  # no data at all yet
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    if zone not in frames:  # e.g. a zone not backfilled
+        raise HTTPException(status_code=503, detail=f"no data for {zone}")
+    return version, frames[zone]
 
 
 def _known(zone: str) -> None:
@@ -59,11 +88,7 @@ def health() -> dict[str, str]:
 def forecast(zone: str = Query(..., description="bidding zone, e.g. SE3, NO1, DK2, FI")) -> dict:
     _known(zone)
     version, df = _model(zone)
-    as_of = df["time"].iloc[0].isoformat()
-    points = [
-        {"time": t.isoformat(), "price_eur_mwh": round(float(p), 2)}
-        for t, p in zip(df["time"], df["price_eur_mwh"], strict=True)
-    ]
+    as_of, points = fc.to_points(df)
     # Best-effort: persist for drift monitoring; never fail serving on a log error.
     try:
         monitoring.log_forecast(zone, as_of, version, points)
@@ -119,5 +144,5 @@ def status() -> dict:
         "service": "elvarsel",
         "version": __version__,
         "zones": list(config.ZONES),
-        "models": {z: v for z, (v, _) in _CACHE.items()},
+        "models": {z: v for v, frames, _ in _CACHE.values() for z in frames},
     }

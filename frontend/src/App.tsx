@@ -3,6 +3,7 @@ import { COUNTRY_NAME, zoneColor, type Zone } from "./api";
 import Controls from "./components/Controls";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
+import ZoneMap from "./components/ZoneMap";
 import ZoneTile from "./components/ZoneTile";
 import { eur, money as makeMoney, relTime, stats, type Unit } from "./lib";
 import { useDashboard, useZoneHistory, type Health } from "./useDashboard";
@@ -39,6 +40,12 @@ export default function App() {
     setCountry(c);
     const local = zones.find((z) => z.country === c)?.currency;
     setCurrency(c === "ALL" || !local || !currencies.includes(local) ? "EUR" : local);
+  };
+  // Map picks any zone: widen the country filter to that zone's country if it's hidden.
+  const selectFromMap = (z: Zone) => {
+    const info = zones.find((i) => i.code === z);
+    if (info && country !== "ALL" && info.country !== country) pickCountry(info.country);
+    setSelected(z);
   };
   const toggle = (z: Zone) =>
     setHidden((prev) => {
@@ -132,7 +139,14 @@ export default function App() {
           )}
         </section>
 
-        <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <section className="rounded-lg border border-line bg-ink-800 p-4 sm:p-5">
+          <h2 className="mb-3 text-sm font-medium text-soft">
+            Price areas <span className="font-normal text-mute">· where is my price set?</span>
+          </h2>
+          <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} />
+        </section>
+        <section className="grid content-start grid-cols-2 gap-3 sm:grid-cols-3">
           {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
             ready && z && !forecasts[z.code] ? (
               <div key={z.code} className="flex flex-col rounded-lg border border-dashed border-line p-4 text-xs text-mute">
@@ -155,6 +169,7 @@ export default function App() {
             )
           )}
         </section>
+        </div>
 
         {ready && selectedInfo && forecasts[selected] && (
           <div className="mt-4">
@@ -172,7 +187,7 @@ export default function App() {
         )}
 
         <footer className="mt-10 text-xs text-mute">
-          LightGBM per bidding zone · prices settle in EUR; local currency via ECB reference rate · refreshes every 60 s
+          One LightGBM model for all 12 zones · shaded band = 80% range · prices settle in EUR; local currency via ECB reference rate · refreshes every 60 s
           · times in your local zone
         </footer>
       </div>

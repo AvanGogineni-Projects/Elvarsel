@@ -19,6 +19,11 @@ jobs:
   daily:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Only a yes/no flag at job level, so the deploy step's `if` can read it (a
+    # step's own env doesn't exist yet when its `if` is evaluated). The token
+    # itself stays scoped to the deploy step, not every step of the job.
+    env:
+      HAS_VERCEL: ${{ secrets.VERCEL_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,7 +56,8 @@ jobs:
         run: npm ci && npm run build
 
       - name: Deploy to Vercel
-        if: hashFiles('frontend/public/data/zones.json') != '' && env.VERCEL_TOKEN != ''
+        id: deploy
+        if: hashFiles('frontend/public/data/zones.json') != '' && env.HAS_VERCEL == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -60,6 +66,13 @@ jobs:
 
       - name: Report a failed daily run
         if: steps.daily.outcome == 'failure'
+        env:
+          DEPLOY: ${{ steps.deploy.outcome }}
         run: |
-          echo "The daily job reported failures (see its step log); the site was deployed with whatever succeeded."
+          # Say what actually happened: a partial deploy, or none at all.
+          if [ "$DEPLOY" = "success" ]; then
+            echo "::error::The daily job reported failures (see its step log). The site was deployed with the zones that succeeded."
+          else
+            echo "::error::The daily job failed (see its step log) and nothing was deployed. Check the repo secrets: DATABASE_URL, ENTSOE_API_TOKEN, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID."
+          fi
           exit 1

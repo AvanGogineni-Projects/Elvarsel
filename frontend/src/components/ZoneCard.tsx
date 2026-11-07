@@ -28,6 +28,8 @@ function MonitorRow({ accuracy, accent }: { accuracy: Accuracy | null; accent: s
     );
   }
   const over = (accuracy.bias ?? 0) >= 0;
+  // Bias is "bad" by size, not sign: |bias| > half the MAE means errors lean one way (systematic skew).
+  const skewed = Math.abs(accuracy.bias ?? 0) > 0.5 * accuracy.mae;
   return (
     <div className="mt-3 flex items-center justify-between text-[11px]">
       <span className="flex items-center gap-1.5 text-mute">
@@ -39,9 +41,9 @@ function MonitorRow({ accuracy, accent }: { accuracy: Accuracy | null; accent: s
         <span className="text-mute">EUR · {accuracy.n} scored</span>
       </span>
       <span
-        className="font-mono"
-        style={{ color: over ? "#fb7185" : "#34d399" }}
-        title="mean prediction bias (+ over-forecasts, − under)"
+        className={`font-mono ${skewed ? "" : "text-mute"}`}
+        style={skewed ? { color: "#fbbf24" } : undefined}
+        title={`mean prediction bias (+ over-forecasts, − under)${skewed ? " — systematic skew" : ""}`}
       >
         bias {over ? "+" : ""}
         {eur(accuracy.bias ?? 0, 1)}

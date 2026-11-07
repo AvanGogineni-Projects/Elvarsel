@@ -21,11 +21,13 @@ TABLES: dict[str, list[str]] = {
     "raw_price": ["zone", "time_start", "time_end", "sek_per_kwh", "eur_per_kwh", "exr"],
     "raw_entsoe": ["zone", "metric", "time_start", "value"],
     "raw_weather": ["zone", "reference_time", "time", "air_temperature", "wind_speed"],
+    "forecast_log": ["zone", "as_of", "target_time", "model_version", "price_eur_mwh"],
 }
 PK: dict[str, list[str]] = {
     "raw_price": ["zone", "time_start"],
     "raw_entsoe": ["zone", "metric", "time_start"],
     "raw_weather": ["zone", "reference_time", "time"],
+    "forecast_log": ["zone", "as_of", "target_time"],
 }
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from elvarsel import __version__, config
+from elvarsel import __version__, config, monitoring
 from elvarsel.models import forecast as fc
 
 app = FastAPI(title="Elvarsel", version=__version__)
@@ -45,16 +45,33 @@ def forecast(zone: str = Query(..., description="SE1..SE4")) -> dict:
         raise HTTPException(status_code=404, detail=f"unknown zone {zone}")
     model, feats, version = _model(zone)
     df = fc.forecast_next_day(zone, model, feats)
+    as_of = df["time"].iloc[0].isoformat()
+    points = [
+        {"time": t.isoformat(), "price_eur_mwh": round(float(p), 2)}
+        for t, p in zip(df["time"], df["price_eur_mwh"], strict=True)
+    ]
+    # Best-effort: persist for drift monitoring; never fail serving on a log error.
+    try:
+        monitoring.log_forecast(zone, as_of, version, points)
+    except Exception:  # noqa: BLE001 — logging must not break the forecast
+        pass
     return {
         "zone": zone,
         "model_version": version,
-        "as_of": df["time"].iloc[0].isoformat(),
+        "as_of": as_of,
         "unit": "EUR/MWh",
-        "forecast": [
-            {"time": t.isoformat(), "price_eur_mwh": round(float(p), 2)}
-            for t, p in zip(df["time"], df["price_eur_mwh"], strict=True)
-        ],
+        "forecast": points,
     }
+
+
+@app.get("/v1/accuracy")
+def accuracy(
+    zone: str = Query(..., description="SE1..SE4"),
+    days: int = Query(7, ge=1, le=90, description="look-back window"),
+) -> dict:
+    if zone not in config.ZONES:
+        raise HTTPException(status_code=404, detail=f"unknown zone {zone}")
+    return monitoring.accuracy(zone, days)
 
 
 @app.get("/v1/status")

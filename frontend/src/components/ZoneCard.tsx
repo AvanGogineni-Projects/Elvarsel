@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import type { Forecast, Zone } from "../api";
+import type { Accuracy, Forecast, Zone } from "../api";
 import { ZONE_META } from "../api";
 import { eur, hhmm, stats } from "../lib";
 import AnimatedNumber from "./AnimatedNumber";
@@ -8,7 +8,46 @@ import ForecastChart from "./ForecastChart";
 interface Props {
   zone: Zone;
   forecast: Forecast;
+  accuracy: Accuracy | null;
   index: number;
+}
+
+// Live model-health readout. MAE only exists once forecasts have matured
+// (24h+) and actuals have landed; until then show how many are logged.
+function MonitorRow({ accuracy, accent }: { accuracy: Accuracy | null; accent: string }) {
+  if (!accuracy || accuracy.mae == null) {
+    const logged = accuracy?.n_logged ?? 0;
+    return (
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-mute">
+        <span className="h-1.5 w-1.5 rounded-full bg-mute/60" />
+        Awaiting actuals
+        <span className="font-mono text-soft">
+          · {logged} forecast{logged === 1 ? "" : "s"} logged
+        </span>
+      </div>
+    );
+  }
+  const over = (accuracy.bias ?? 0) >= 0;
+  return (
+    <div className="mt-3 flex items-center justify-between text-[11px]">
+      <span className="flex items-center gap-1.5 text-mute">
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: accent }} />
+        Live MAE
+        <span className="font-mono text-sm font-semibold text-soft">
+          <AnimatedNumber value={accuracy.mae} />
+        </span>
+        <span className="text-mute">EUR · {accuracy.n} scored</span>
+      </span>
+      <span
+        className="font-mono"
+        style={{ color: over ? "#fb7185" : "#34d399" }}
+        title="mean prediction bias (+ over-forecasts, − under)"
+      >
+        bias {over ? "+" : ""}
+        {eur(accuracy.bias ?? 0, 1)}
+      </span>
+    </div>
+  );
 }
 
 function Stat({ label, value, unit }: { label: string; value: number; unit?: string }) {
@@ -23,7 +62,7 @@ function Stat({ label, value, unit }: { label: string; value: number; unit?: str
   );
 }
 
-export default function ZoneCard({ zone, forecast, index }: Props) {
+export default function ZoneCard({ zone, forecast, accuracy, index }: Props) {
   const meta = ZONE_META[zone];
   const s = stats(forecast);
 
@@ -89,6 +128,10 @@ export default function ZoneCard({ zone, forecast, index }: Props) {
           {forecast.model_version}
         </span>
       </footer>
+
+      <div className="mt-3 border-t border-line pt-1">
+        <MonitorRow accuracy={accuracy} accent={meta.accent} />
+      </div>
     </motion.article>
   );
 }

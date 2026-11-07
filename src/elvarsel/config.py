@@ -41,6 +41,23 @@ ELPRIS_ZONES: tuple[str, ...] = tuple(z for z, info in ZONES.items() if info.cou
 
 ZONE_COORDS: dict[str, tuple[float, float]] = {z: (i.lat, i.lon) for z, i in ZONES.items()}
 
+# Two points in each zone's main wind-power area, for NWP wind forecasts (the load
+# centre in ZONES is where temperature -> heating demand matters instead).
+WIND_SITES: dict[str, tuple[tuple[float, float], ...]] = {
+    "SE1": ((65.4, 20.9), (66.6, 22.0)),  # Markbygden / Norrbotten
+    "SE2": ((63.0, 15.5), (62.8, 17.0)),  # Jämtland / Västernorrland
+    "SE3": ((58.3, 13.0), (59.5, 15.5)),  # Västra Götaland / Bergslagen
+    "SE4": ((55.7, 13.5), (56.6, 16.3)),  # Skåne / Kalmar coast
+    "NO4": ((70.6, 29.9), (69.9, 20.1)),  # Finnmark / Troms
+    "NO3": ((63.9, 10.0), (64.4, 11.2)),  # Fosen
+    "NO5": ((61.2, 4.9), (59.4, 5.3)),
+    "NO1": ((59.9, 11.5), (60.8, 11.2)),
+    "NO2": ((58.7, 5.6), (58.1, 7.0)),  # Jæren / Agder
+    "FI": ((64.6, 24.6), (63.0, 21.5)),  # Ostrobothnia coast
+    "DK1": ((56.0, 8.3), (55.5, 7.8)),  # West Jutland / Horns Rev
+    "DK2": ((54.8, 11.4), (55.0, 12.8)),  # Lolland / Kriegers Flak
+}
+
 ENTSOE_API_TOKEN: str | None = os.getenv("ENTSOE_API_TOKEN") or None
 
 DATA_DIR = Path(os.getenv("ELVARSEL_DATA_DIR", "data"))

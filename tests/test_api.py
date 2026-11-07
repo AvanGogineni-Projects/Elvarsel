@@ -28,11 +28,10 @@ def test_prices_returns_last_n_days_hourly(monkeypatch):
 
 
 def test_forecast_503_when_zone_has_no_data(monkeypatch):
-    def no_data(zone):
-        raise ValueError(f"no data for {zone}")
-
-    main._CACHE.pop("DK1", None)
-    monkeypatch.setattr(main.fc, "train_and_forecast", no_data)
+    frame = pd.DataFrame({"time": pd.date_range("2026-11-08", periods=24, freq="1h", tz="UTC"),
+                          "price_eur_mwh": 1.0, "low": 0.0, "high": 2.0})
+    main._CACHE.clear()
+    monkeypatch.setattr(main.fc, "train_and_forecast_all", lambda: ("v", {"SE3": frame}))
     r = TestClient(main.app).get("/v1/forecast", params={"zone": "DK1"})
     assert r.status_code == 503
     assert "no data" in r.json()["detail"]
@@ -45,3 +44,16 @@ def test_fx_latest_is_none_when_ecb_unreachable(monkeypatch):
     fx._rates.cache_clear()
     monkeypatch.setattr(fx.httpx, "get", boom)
     assert fx.latest({"SEK", "EUR"}) is None
+
+
+def test_backtest_serves_report_json(monkeypatch, tmp_path):
+    from elvarsel.models import report
+
+    summary = pd.DataFrame([{"zone": "SE3", "model_mae": 17.7, "baseline_mae": 30.0, "mae_improvement_pct": 41.0}])
+    path = report.write_json(summary, path=tmp_path / "bt.json", n_splits=52)
+    monkeypatch.setattr(main.report, "JSON_PATH", path)
+    body = TestClient(main.app).get("/v1/backtest").json()
+    assert body["weeks"] == 52 and body["zones"]["SE3"]["improvement_pct"] == 41.0
+
+    monkeypatch.setattr(main.report, "JSON_PATH", tmp_path / "missing.json")
+    assert TestClient(main.app).get("/v1/backtest").status_code == 404

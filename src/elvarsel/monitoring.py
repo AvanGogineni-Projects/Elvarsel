@@ -124,13 +124,19 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
     }
 
 
-def accuracy(zone: str, days: int = 7) -> dict:
-    """Live accuracy for a zone over the last `days` of logged forecasts."""
-    base = {"zone": zone, "window_days": days, "unit": "EUR/MWh"}
+def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
+    """Live accuracy for a zone over the last `days` of logged forecasts.
+
+    `model_family` (e.g. "lgbm-nordic") restricts scoring to that model's forecasts,
+    so a retired model's history can't stand in for the one being served.
+    """
+    base = {"zone": zone, "window_days": days, "unit": "EUR/MWh", "model_family": model_family}
     if not storage.enabled():
         return {**base, "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": [], "baseline_mae": None}
     ensure_table()
     log = _read_log(zone, days)
+    if model_family:
+        log = log[log["model_version"].str.startswith(f"{model_family}-")]
     realized = build.hourly_price(build.load_prices(zone))
     return {**base, **score(log, realized)}
 

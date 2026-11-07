@@ -1,18 +1,20 @@
 import { useMemo, useState } from "react";
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { COUNTRY_NAME, zoneColor, type Accuracy, type Forecast, type Prices, type ZoneInfo } from "../api";
+import { COUNTRY_NAME, type Accuracy, type Forecast, type Prices, type ZoneInfo } from "../api";
 import { eur, health, hhmm, type Money } from "../lib";
-import { HEALTH_STYLE } from "./ZoneTile";
+import { useTheme } from "../theme";
+import { HEALTH_STYLE, type ZoneBacktest } from "./ZoneTile";
 
 interface Props {
   zone: ZoneInfo;
@@ -23,6 +25,7 @@ interface Props {
   days: number;
   onDays: (d: number) => void;
   money: Money;
+  backtest?: ZoneBacktest;
 }
 
 const RANGES = [
@@ -31,12 +34,6 @@ const RANGES = [
   { days: 90, label: "90D" },
   { days: 365, label: "1Y" },
 ];
-const AXIS = { fill: "#8a8d96", fontSize: 11 };
-const TIP = {
-  contentStyle: { background: "#191a1e", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 6, fontSize: 12 },
-  labelStyle: { color: "#8a8d96" },
-  itemStyle: { color: "#d4d6db" },
-};
 const DAY = 24 * 3600_000;
 
 const dayHour = (iso: string) =>
@@ -44,11 +41,21 @@ const dayHour = (iso: string) =>
 const dayOnly = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 // Actual price over the window, the logged model forecast where one exists, and the
-// naive baseline (actual price one day earlier) for every hour.
-function series(prices: Prices | null, accuracy: Accuracy | null, money: Money) {
+// naive baseline (actual price one day earlier) for every hour, then tomorrow's
+// forecast with its 80% range after the last actual.
+type Row = {
+  time: string;
+  actual?: number;
+  forecast?: number | null;
+  baseline?: number | null;
+  next?: number;
+  band?: [number, number];
+};
+
+function series(prices: Prices | null, accuracy: Accuracy | null, next: Forecast, money: Money): Row[] {
   const actual = new Map((prices?.points ?? []).map((p) => [Date.parse(p.time), p.price_eur_mwh]));
   const forecast = new Map((accuracy?.points ?? []).map((p) => [Date.parse(p.time), p.forecast]));
-  return [...actual.keys()].map((t) => {
+  const past = [...actual.keys()].map((t) => {
     const base = actual.get(t - DAY);
     const f = forecast.get(t);
     return {
@@ -56,25 +63,41 @@ function series(prices: Prices | null, accuracy: Accuracy | null, money: Money) 
       actual: money.conv(actual.get(t)!),
       forecast: f == null ? null : money.conv(f),
       baseline: base == null ? null : money.conv(base),
-    };
+    } as Row;
   });
+  const last = past.length ? Date.parse(past[past.length - 1].time) : -Infinity;
+  const ahead = next.forecast
+    .filter((p) => Date.parse(p.time) > last)
+    .map((p) => ({
+      time: p.time,
+      next: money.conv(p.price_eur_mwh),
+      band: p.low != null && p.high != null ? ([money.conv(p.low), money.conv(p.high)] as [number, number]) : undefined,
+    }));
+  return [...past, ...ahead];
 }
 
 function Metric({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: string }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wider text-mute">{label}</div>
-      <div className={`mt-1 font-mono text-xl font-semibold tabular ${tone ?? "text-white"}`}>{value}</div>
-      <div className="mt-0.5 text-[11px] text-mute">{hint}</div>
+      <div className="caps text-mute">{label}</div>
+      <div className={`mt-1 font-mono text-[32px] font-medium leading-none tracking-[-0.03em] tabular ${tone ?? "text-fg"}`}>{value}</div>
+      <div className="caps mt-1.5 text-mute">{hint}</div>
     </div>
   );
 }
 
-export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, days, onDays, money }: Props) {
+export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, days, onDays, money, backtest }: Props) {
   const [showBase, setShowBase] = useState(true);
-  const color = zoneColor(zone.code);
+  const { p } = useTheme();
+  const AXIS = { fill: p.axis, fontSize: 11, fontFamily: "IBM Plex Mono, monospace" };
+  const TIP = {
+    contentStyle: { background: p.surface, border: `1px solid ${p.border}`, borderRadius: 0, fontSize: 12, fontFamily: "IBM Plex Mono, monospace" },
+    labelStyle: { color: p.axis },
+    itemStyle: { color: p.soft },
+  };
+  const color = p.signal; // the model's own lines are the signal colour
   const h = HEALTH_STYLE[health(accuracy)];
-  const data = useMemo(() => series(prices, accuracy, money), [prices, accuracy, money]);
+  const data = useMemo(() => series(prices, accuracy, forecast, money), [prices, accuracy, forecast, money]);
   const scored = accuracy?.mae != null;
   const gain =
     scored && accuracy!.baseline_mae ? (1 - accuracy!.mae! / accuracy!.baseline_mae) * 100 : null;
@@ -82,41 +105,38 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
   const m = (v: number) => eur(money.conv(v), money.digits);
 
   return (
-    <section className="rounded-lg border border-line bg-ink-800">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
-        <h2 className="text-base font-semibold text-white">
-          <span style={{ color }}>{zone.code}</span> · {zone.city}
-          <span className="ml-2 text-sm font-normal text-mute">{COUNTRY_NAME[zone.country] ?? zone.country}</span>
-        </h2>
-        <span className={`text-sm ${h.className}`}>● {h.label}</span>
+    <div className="border-t border-line">
+      <header className="caps flex flex-wrap items-center justify-between gap-3 border-b border-dashed border-line/40 py-2">
+        <span className="text-mute">{COUNTRY_NAME[zone.country] ?? zone.country} · bidding zone {zone.code}</span>
+        <span className={h.className}>{h.label}</span>
       </header>
 
-      <div className="grid gap-px bg-line lg:grid-cols-3">
-        <div className="bg-ink-800 p-5 lg:col-span-2">
+      <div className="grid divide-y divide-line lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+        <div className="py-5 lg:col-span-2 lg:pr-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-medium text-soft">Price history · forecast vs actual</h3>
-              <p className="mt-0.5 text-xs text-mute">{money.label} · hourly</p>
+              <h3 className="text-lg font-bold tracking-tight text-fg">Price history, forecast vs actual</h3>
+              <p className="caps mt-0.5 text-mute">{money.label} · hourly</p>
             </div>
             <div className="flex items-center gap-2">
-              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-mute">
+              <label className="caps flex cursor-pointer items-center gap-1.5 text-mute">
                 <input
                   type="checkbox"
                   checked={showBase}
                   onChange={(e) => setShowBase(e.target.checked)}
-                  className="accent-white"
+                  className="accent-fg"
                 />
                 Baseline
               </label>
-              <div role="radiogroup" aria-label="Range" className="flex rounded-md border border-line p-0.5">
-                {RANGES.map((r) => (
+              <div role="radiogroup" aria-label="Range" className="flex border border-line">
+                {RANGES.map((r, i) => (
                   <button
                     key={r.days}
                     role="radio"
                     aria-checked={r.days === days}
                     onClick={() => onDays(r.days)}
-                    className={`rounded px-2 py-0.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
-                      r.days === days ? "bg-ink-600 text-white" : "text-mute hover:text-soft"
+                    className={`caps px-2 py-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${i ? "border-l border-line" : ""} ${
+                      r.days === days ? "bg-ink-600 on-active" : "text-mute hover:text-fg"
                     }`}
                   >
                     {r.label}
@@ -129,15 +149,15 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
           <div className={`mt-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
             {data.length ? (
               <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid stroke={p.grid} strokeDasharray="2 4" vertical={false} />
                   <XAxis
                     dataKey="time"
                     tickFormatter={days > 7 ? dayOnly : dayHour}
                     minTickGap={48}
                     tick={AXIS}
                     tickLine={false}
-                    axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                    axisLine={{ stroke: p.axisLine }}
                   />
                   <YAxis
                     width={56}
@@ -151,31 +171,41 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
                   <Tooltip
                     {...TIP}
                     labelFormatter={dayHour}
-                    formatter={(v: number, name: string) => [`${eur(v, money.digits)} ${money.label}`, name]}
+                    formatter={(v: number | [number, number], name: string) => [
+                      Array.isArray(v)
+                        ? `${eur(v[0], money.digits)} – ${eur(v[1], money.digits)} ${money.label}`
+                        : `${eur(v, money.digits)} ${money.label}`,
+                      name,
+                    ]}
                   />
-                  <Line name="Actual" dataKey="actual" type="monotone" stroke="#eceef1" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                  <Area name="Tomorrow 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.14} isAnimationActive={false} />
+                  <Line name="Actual" dataKey="actual" type="linear" stroke={p.fg} strokeWidth={1.25} dot={false} isAnimationActive={false} />
                   {showBase && (
-                    <Line name="Baseline (yesterday)" dataKey="baseline" type="monotone" stroke="#8a8d96" strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
+                    <Line name="Baseline (yesterday)" dataKey="baseline" type="linear" stroke={p.baseline} strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
                   )}
                   <Line name="Model forecast" dataKey="forecast" type="monotone" stroke={color} strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
-                </LineChart>
+                  <Line name="Tomorrow" dataKey="next" type="linear" stroke={color} strokeWidth={2.25} strokeDasharray="5 3" dot={false} isAnimationActive={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             ) : (
-              <div className="grid h-[260px] place-items-center rounded-md border border-dashed border-line text-sm text-mute">
+              <div className="caps grid h-[260px] place-items-center border border-dashed border-line/50 text-mute">
                 {loading ? "Loading history…" : forecast.mocked ? "No live data for this zone yet." : "No price history in this range."}
               </div>
             )}
-            <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-mute">
-              <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-[#eceef1]" /> Actual</span>
+            <div className="caps mt-3 flex flex-wrap gap-4 text-mute">
+              <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-fg" /> Actual</span>
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: color }} /> Model forecast (logged)</span>
               {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Tomorrow · 80% range</span>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col gap-5 bg-ink-800 p-5">
-          <h3 className="text-sm font-medium text-soft">
-            Live accuracy · last {accuracy?.window_days ?? Math.min(days, 90)} days
+        <div className="flex flex-col gap-5 py-5 lg:pl-6">
+          <h3 className="text-lg font-bold tracking-tight text-fg">
+            {scored || !backtest
+              ? `Live accuracy · last ${accuracy?.window_days ?? Math.min(days, 90)} days`
+              : `Accuracy · ${backtest.weeks}-week backtest`}
           </h3>
           {scored ? (
             <>
@@ -188,41 +218,57 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
                 />
               </div>
               {gain != null && (
-                <p className={`rounded-md border px-3 py-2 text-xs ${gain > 0 ? "border-ok/30 text-ok" : "border-warn/30 text-warn"}`}>
+                <p className={`border-l-[3px] pl-3 text-sm leading-snug ${gain > 0 ? "border-fg text-fg" : "border-signal text-signal"}`}>
                   {gain > 0
                     ? `Model beats the baseline by ${eur(gain, 0)}%.`
                     : `Baseline is ${eur(-gain, 0)}% better — the model is not earning its place here yet.`}
                 </p>
               )}
-              <p className="text-xs leading-relaxed text-mute">
+              <p className="text-sm leading-relaxed text-mute">
                 {Math.abs(accuracy!.bias ?? 0) < 0.05
                   ? "No systematic lean."
                   : `${accuracy!.bias! < 0 ? "Under" : "Over"}-forecasting by ${m(Math.abs(accuracy!.bias!))} ${money.label} on average.`}{" "}
                 RMSE {m(accuracy!.rmse!)}. {accuracy!.n} scored hours.
               </p>
               <div>
-                <div className="text-[11px] uppercase tracking-wider text-mute">Error by hour of delivery day</div>
+                <div className="caps text-mute">Error by hour of delivery day</div>
                 <ResponsiveContainer width="100%" height={100}>
                   <BarChart data={accuracy!.by_horizon} margin={{ top: 8, right: 0, bottom: 0, left: -24 }}>
                     <XAxis dataKey="h" tick={{ ...AXIS, fontSize: 10 }} tickLine={false} axisLine={false} interval={5} />
                     <YAxis tick={{ ...AXIS, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => eur(money.conv(v), 0)} />
                     <Tooltip
                       {...TIP}
-                      cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                      cursor={{ fill: p.grid }}
                       formatter={(v: number) => [`${m(v)} ${money.label}`, "MAE"]}
                       labelFormatter={(hr) => `hour ${hr}`}
                     />
-                    <Bar dataKey="mae" fill={color} fillOpacity={0.7} radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="mae" fill={p.fg} fillOpacity={0.85} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </>
           ) : (
-            <p className="text-sm text-mute">
-              Accuracy appears once logged forecasts mature (~24h). {accuracy?.n_logged ?? 0} logged so far.
-            </p>
+            <>
+              {backtest && (
+                <div className="flex flex-col gap-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Metric label="Model MAE" value={m(backtest.model_mae)} hint={`avg miss, ${money.label}`} />
+                    <Metric label="Baseline MAE" value={m(backtest.baseline_mae)} hint="same hour yesterday" />
+                  </div>
+                  <p className={`border-l-[3px] pl-3 text-sm leading-snug ${backtest.improvement_pct > 0 ? "border-fg text-fg" : "border-signal text-signal"}`}>
+                    {backtest.improvement_pct > 0
+                      ? `${eur(backtest.improvement_pct, 0)}% smaller error than the baseline`
+                      : `Baseline is ${eur(-backtest.improvement_pct, 0)}% better`}{" "}
+                    over a {backtest.weeks}-week walk-forward backtest (retrained weekly, never sees the future).
+                  </p>
+                </div>
+              )}
+              <p className="text-sm text-mute">
+                Live accuracy for this model appears once its forecasts mature (~24h). {accuracy?.n_logged ?? 0} logged so far.
+              </p>
+            </>
           )}
-          <dl className="mt-auto grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 border-t border-line pt-4 text-xs">
+          <dl className="caps mt-auto grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 border-t border-dashed border-line/40 pt-3">
             <dt className="text-mute">Model</dt>
             <dd className="truncate font-mono text-soft" title={forecast.model_version}>{forecast.model_version}</dd>
             <dt className="text-mute">Forecast from</dt>
@@ -230,6 +276,6 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
           </dl>
         </div>
       </div>
-    </section>
+    </div>
   );
 }

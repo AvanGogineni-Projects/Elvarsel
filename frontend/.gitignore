@@ -5,3 +5,6 @@ dist-ssr
 .env
 .vite
 *.tsbuildinfo
+
+# Static data snapshot, generated daily by the GitHub Action (python -m elvarsel.daily --export)
+public/data/

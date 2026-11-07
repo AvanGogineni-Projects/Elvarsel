@@ -1,0 +1,68 @@
+{
+  "generated": "2026-11-07",
+  "weeks": 52,
+  "baseline": "naive-24 (same hour the previous day)",
+  "unit": "EUR/MWh",
+  "zones": {
+    "DK1": {
+      "model_mae": 21.14,
+      "baseline_mae": 32.07,
+      "improvement_pct": 34.1
+    },
+    "DK2": {
+      "model_mae": 22.49,
+      "baseline_mae": 34.2,
+      "improvement_pct": 34.2
+    },
+    "FI": {
+      "model_mae": 19.21,
+      "baseline_mae": 33.28,
+      "improvement_pct": 42.3
+    },
+    "NO1": {
+      "model_mae": 13.39,
+      "baseline_mae": 17.95,
+      "improvement_pct": 25.4
+    },
+    "NO2": {
+      "model_mae": 14.8,
+      "baseline_mae": 19.05,
+      "improvement_pct": 22.3
+    },
+    "NO3": {
+      "model_mae": 14.3,
+      "baseline_mae": 18.64,
+      "improvement_pct": 23.3
+    },
+    "NO4": {
+      "model_mae": 12.5,
+      "baseline_mae": 16.56,
+      "improvement_pct": 24.5
+    },
+    "NO5": {
+      "model_mae": 11.79,
+      "baseline_mae": 13.82,
+      "improvement_pct": 14.7
+    },
+    "SE1": {
+      "model_mae": 14.34,
+      "baseline_mae": 23.17,
+      "improvement_pct": 38.1
+    },
+    "SE2": {
+      "model_mae": 14.37,
+      "baseline_mae": 24.31,
+      "improvement_pct": 40.9
+    },
+    "SE3": {
+      "model_mae": 17.73,
+      "baseline_mae": 30.0,
+      "improvement_pct": 40.9
+    },
+    "SE4": {
+      "model_mae": 23.03,
+      "baseline_mae": 37.01,
+      "improvement_pct": 37.8
+    }
+  }
+}

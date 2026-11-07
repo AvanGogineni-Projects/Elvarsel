@@ -7,7 +7,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { zoneColor, type Forecast, type Zone } from "../api";
+import type { Forecast, Zone } from "../api";
+import { useTheme } from "../theme";
 import { eur, hhmm, type Money } from "../lib";
 
 interface Props {
@@ -34,22 +35,19 @@ function rows(zones: Zone[], forecasts: Record<Zone, Forecast>, money: Money) {
   });
 }
 
-function ChartTooltip({ active, payload, money }: any) {
+function ChartTooltip({ active, payload, money, selected }: any) {
   if (!active || !payload?.length) return null;
   const sorted = [...payload].sort((a, b) => b.value - a.value);
   return (
-    <div className="min-w-[160px] rounded-md border border-line bg-ink-700 px-3 py-2 text-xs shadow-xl">
-      <div className="mb-1.5 flex justify-between font-mono text-mute">
+    <div className="min-w-[170px] border border-line bg-ink-800 px-3 py-2 text-xs">
+      <div className="caps mb-1.5 flex justify-between border-b border-line pb-1.5 text-mute">
         <span>{hhmm(payload[0].payload.time)}</span>
         <span>{money.label}</span>
       </div>
       {sorted.map((p: any) => (
-        <div key={p.dataKey} className="flex items-center justify-between gap-4 py-0.5">
-          <span className="flex items-center gap-1.5 text-soft">
-            <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
-            {p.dataKey}
-          </span>
-          <span className="font-mono tabular text-soft">{eur(p.value, money.digits)}</span>
+        <div key={p.dataKey} className={`flex justify-between gap-4 py-0.5 font-mono tabular ${p.dataKey === selected ? "text-signal" : "text-soft"}`}>
+          <span>{p.dataKey}</span>
+          <span>{eur(p.value, money.digits)}</span>
         </div>
       ))}
     </div>
@@ -57,10 +55,28 @@ function ChartTooltip({ active, payload, money }: any) {
 }
 
 export default function OverviewChart({ zones, hidden, forecasts, selected, money, onSelect, onToggle }: Props) {
+  const { p } = useTheme();
   const shown = zones.filter((z) => !hidden.has(z));
+  const data = rows(shown.length ? shown : zones, forecasts, money);
+  // Print-style direct labels: each series is named at its line end, not by a colour key.
+  const endLabel = (z: Zone) => (props: { x?: number; y?: number; index?: number }) =>
+    props.index === data.length - 1 && props.x != null && props.y != null ? (
+      <text
+        x={props.x + 6}
+        y={props.y + 3.5}
+        fontSize={10}
+        fontFamily="IBM Plex Mono, monospace"
+        fill={z === selected ? p.signal : p.axis}
+        fontWeight={z === selected ? 600 : 400}
+      >
+        {z}
+      </text>
+    ) : (
+      <g />
+    );
   return (
     <>
-      <div className="mb-3 flex flex-wrap gap-1.5" aria-label="Show or hide zones">
+      <div className="mb-4 flex flex-wrap gap-x-3 gap-y-1" aria-label="Show or hide zones">
         {zones.map((z) => {
           const off = hidden.has(z);
           return (
@@ -69,47 +85,47 @@ export default function OverviewChart({ zones, hidden, forecasts, selected, mone
               onClick={() => onToggle(z)}
               aria-pressed={!off}
               title={off ? `Show ${z}` : `Hide ${z}`}
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
-                off ? "border-line text-mute line-through" : "border-white/15 text-soft hover:bg-ink-700"
+              className={`caps transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
+                off ? "text-mute line-through" : z === selected ? "text-signal" : "text-fg hover:text-signal"
               }`}
             >
-              <span className="h-2 w-2 rounded-full" style={{ background: off ? "transparent" : zoneColor(z), boxShadow: `inset 0 0 0 1px ${zoneColor(z)}` }} />
-              {z}
+              {off ? "○" : "●"} {z}
             </button>
           );
         })}
       </div>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={rows(shown.length ? shown : zones, forecasts, money)} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+        <LineChart data={data} margin={{ top: 8, right: 40, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke={p.grid} strokeDasharray="2 4" vertical={false} />
           <XAxis
             dataKey="label"
             minTickGap={24}
-            tick={{ fill: "#8a8d96", fontSize: 11 }}
+            tick={{ fill: p.axis, fontSize: 11, fontFamily: "IBM Plex Mono, monospace" }}
             tickLine={false}
-            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+            axisLine={{ stroke: p.axisLine }}
           />
           <YAxis
             width={56}
-            tick={{ fill: "#8a8d96", fontSize: 11 }}
+            tick={{ fill: p.axis, fontSize: 11, fontFamily: "IBM Plex Mono, monospace" }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v) => eur(v, 0)}
           />
-          <Tooltip content={<ChartTooltip money={money} />} cursor={{ stroke: "rgba(255,255,255,0.15)" }} />
-          {shown.map((z) => (
+          <Tooltip content={<ChartTooltip money={money} selected={selected} />} cursor={{ stroke: p.cursor, strokeDasharray: "2 3" }} />
+          {/* Selected series last so it draws on top. */}
+          {[...shown.filter((z) => z !== selected), ...shown.filter((z) => z === selected)].map((z) => (
             <Line
               key={z}
               dataKey={z}
-              type="monotone"
-              stroke={zoneColor(z)}
-              strokeWidth={z === selected ? 2.75 : 1.5}
-              strokeOpacity={z === selected ? 1 : 0.55}
+              type="linear"
+              stroke={z === selected ? p.signal : p.ink}
+              strokeWidth={z === selected ? 2.5 : 1.1}
               dot={false}
-              activeDot={{ r: 3.5, stroke: "#0b0c0e", strokeWidth: 2, onClick: () => onSelect(z) }}
+              label={endLabel(z)}
+              activeDot={{ r: 3, fill: z === selected ? p.signal : p.fg, stroke: p.surface, strokeWidth: 2, onClick: () => onSelect(z) }}
               onClick={() => onSelect(z)}
               style={{ cursor: "pointer" }}
-              animationDuration={600}
+              isAnimationActive={false}
             />
           ))}
         </LineChart>

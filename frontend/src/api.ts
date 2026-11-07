@@ -1,5 +1,6 @@
 // API client for the Elvarsel FastAPI service.
 // Base URL is configurable via VITE_API_BASE (default http://localhost:8000).
+import { themedZoneColor } from "./theme";
 // Prices arrive in EUR/MWh (Nord Pool's settlement currency); display currency
 // conversion happens client-side with the ECB rates from /v1/zones.
 
@@ -32,21 +33,8 @@ export const COUNTRY_NAME: Record<string, string> = {
 };
 
 // Fixed colour per zone so a zone keeps its colour whatever the filter.
-export const ZONE_COLOR: Record<Zone, string> = {
-  SE1: "#7cc4fa",
-  SE2: "#5fd4a4",
-  SE3: "#b9a3fb",
-  SE4: "#f7869a",
-  NO1: "#fb923c",
-  NO2: "#facc15",
-  NO3: "#a3e635",
-  NO4: "#22d3ee",
-  NO5: "#e879f9",
-  DK1: "#f87171",
-  DK2: "#cbd5e1",
-  FI: "#3b82f6",
-};
-export const zoneColor = (z: Zone) => ZONE_COLOR[z] ?? "#8a8d96";
+// Theme-aware zone accents (deeper shades in light mode): see theme.tsx.
+export const zoneColor = (z: Zone) => themedZoneColor(z);
 
 // Only used when /v1/zones is unreachable (demo mode); the backend's config.ZONES is the source of truth.
 export const FALLBACK_ZONES: ZoneInfo[] = [
@@ -59,6 +47,8 @@ export const FALLBACK_ZONES: ZoneInfo[] = [
 export interface ForecastPoint {
   time: string; // ISO8601
   price_eur_mwh: number;
+  low?: number; // calibrated 80% range from quantile models (absent in demo data)
+  high?: number;
 }
 
 export interface Forecast {
@@ -96,17 +86,48 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
+// Walk-forward backtest per zone: the measured accuracy while live scores accrue.
+export interface Backtest {
+  generated: string;
+  weeks: number;
+  baseline: string;
+  zones: Partial<Record<Zone, { model_mae: number; baseline_mae: number; improvement_pct: number }>>;
+}
+// Static mode (the Vercel build): the daily GitHub Action bakes every API response
+// into /data/*.json (src/elvarsel/export.py), same shapes, so no server is needed.
+export const STATIC_DATA = import.meta.env.VITE_STATIC_DATA === "1";
+const staticJSON = <T,>(file: string, signal?: AbortSignal) =>
+  fetch(`${import.meta.env.BASE_URL}data/${file}`, { signal }).then((r) => {
+    if (!r.ok) throw new Error(`${file} -> ${r.status}`);
+    return r.json() as Promise<T>;
+  });
+
+export const fetchBacktest = (signal?: AbortSignal) =>
+  STATIC_DATA ? staticJSON<Backtest>("backtest.json", signal) : getJSON<Backtest>("/v1/backtest", signal);
+
 export const fetchZones = (signal?: AbortSignal) =>
-  getJSON<{ zones: ZoneInfo[]; fx: Fx | null }>(`/v1/zones`, signal);
+  STATIC_DATA
+    ? staticJSON<{ zones: ZoneInfo[]; fx: Fx | null; generated_at?: string }>("zones.json", signal)
+    : getJSON<{ zones: ZoneInfo[]; fx: Fx | null; generated_at?: string }>(`/v1/zones`, signal);
 
 export const fetchForecast = (zone: Zone, signal?: AbortSignal) =>
-  getJSON<Forecast>(`/v1/forecast?zone=${zone}`, signal);
+  STATIC_DATA ? staticJSON<Forecast>(`forecast/${zone}.json`, signal) : getJSON<Forecast>(`/v1/forecast?zone=${zone}`, signal);
 
+// The snapshot has 7/30/90-day windows (the windows the dashboard asks for).
+const accWindow = (days: number) => (days <= 7 ? 7 : days <= 30 ? 30 : 90);
 export const fetchAccuracy = (zone: Zone, days = 7, signal?: AbortSignal) =>
-  getJSON<Accuracy>(`/v1/accuracy?zone=${zone}&days=${days}`, signal);
+  STATIC_DATA
+    ? staticJSON<Accuracy>(`accuracy/${zone}-${accWindow(days)}.json`, signal)
+    : getJSON<Accuracy>(`/v1/accuracy?zone=${zone}&days=${days}`, signal);
 
-export const fetchPrices = (zone: Zone, days = 30, signal?: AbortSignal) =>
-  getJSON<Prices>(`/v1/prices?zone=${zone}&days=${days}`, signal);
+// The snapshot holds a year of prices per zone; shorter ranges are sliced here,
+// with the same rule as the API (strictly within `days` of the latest hour).
+export const fetchPrices = async (zone: Zone, days = 30, signal?: AbortSignal): Promise<Prices> => {
+  if (!STATIC_DATA) return getJSON<Prices>(`/v1/prices?zone=${zone}&days=${days}`, signal);
+  const all = await staticJSON<Prices>(`prices/${zone}.json`, signal);
+  const last = all.points.length ? Date.parse(all.points[all.points.length - 1].time) : 0;
+  return { ...all, points: all.points.filter((p) => Date.parse(p.time) > last - days * 86_400_000) };
+};
 
 // --- Mock fallback ---------------------------------------------------------
 // Deterministic next-day curve: a daily double-peak (morning/evening) shape

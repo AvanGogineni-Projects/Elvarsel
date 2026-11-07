@@ -98,3 +98,20 @@ def test_accuracy_endpoint_graceful_without_db(monkeypatch):
     assert body["zone"] == "SE3"
     assert body["n"] == 0
     assert body["mae"] is None
+
+
+def test_accuracy_scores_only_the_current_model_family(monkeypatch):
+    log = pd.DataFrame({
+        "as_of": pd.to_datetime(["2026-11-05T23:00Z", "2026-11-05T23:00Z"], utc=True),
+        "target_time": pd.to_datetime(["2026-11-06T00:00Z", "2026-11-06T01:00Z"], utc=True),
+        "model_version": ["lgbm-SE3-20261105T22", "lgbm-nordic-20261105T22"],
+        "price_eur_mwh": [10.0, 50.0],
+    })
+    realized = pd.Series([40.0, 48.0], index=pd.to_datetime(["2026-11-06T00:00Z", "2026-11-06T01:00Z"], utc=True))
+    monkeypatch.setattr(monitoring.storage, "enabled", lambda: True)
+    monkeypatch.setattr(monitoring, "ensure_table", lambda: None)
+    monkeypatch.setattr(monitoring, "_read_log", lambda z, d: log)
+    monkeypatch.setattr(monitoring.build, "load_prices", lambda z: pd.DataFrame())
+    monkeypatch.setattr(monitoring.build, "hourly_price", lambda raw: realized)
+    s = monitoring.accuracy("SE3", 7, model_family="lgbm-nordic")
+    assert s["n_logged"] == 1 and s["mae"] == pytest.approx(2.0)  # the retired per-zone row is ignored

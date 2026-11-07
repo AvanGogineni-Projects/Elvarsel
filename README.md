@@ -54,10 +54,15 @@ python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-0
 # Backfill years of history straight into the database (hourly, resumable)
 python -m elvarsel.ingest.backfill --years 2
 python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
+python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temperature
+
+# Daily: ingest -> retrain -> forecast -> log (GitHub Action at 09:15 UTC;
+# needs repo secrets DATABASE_URL and ENTSOE_API_TOKEN)
+python -m elvarsel.daily
 ```
 
-**Model:** LightGBM per zone, beating "same hour yesterday" by 23.6% MAE over a
-13-week walk-forward backtest (all 12 zones). See
+**Model:** one LightGBM model for all 12 zones (wind/temperature forecasts, load forecast, holidays), beating "same hour yesterday" by 33.6% MAE over a
+52-week walk-forward backtest (all 12 zones), with a calibrated 80% range. See
 [docs/model-analysis.md](docs/model-analysis.md) for the data analysis and
 [docs/backtest-results.md](docs/backtest-results.md) for per-zone numbers.
 
@@ -89,7 +94,36 @@ pytest -q
 CI (GitHub Actions) runs ruff + pytest on Python 3.12 for every PR and for
 pushes to `main`.
 
-## Deploy
+## Deploy (static site on Vercel, pipeline on GitHub Actions)
 
-See `Dockerfile` (Python 3.12 base for reliable ML wheels in later phases).
-PaaS target chosen in a later phase.
+No server runs in production. Day-ahead prices are set once a day, so a daily
+snapshot loses nothing:
+
+1. `.github/workflows/daily.yml` runs at 09:15 UTC (and on pushes to `main`):
+   ingest → retrain → forecast → log, then `--export` bakes every response the
+   dashboard reads into `frontend/public/data/*.json` (same shapes as the API,
+   produced by the API's own functions).
+2. It builds the dashboard with `VITE_STATIC_DATA=1` (reads `/data/*.json`
+   instead of the API) and deploys `frontend/dist` with the Vercel CLI.
+
+One-time setup:
+
+- **Vercel:** create a project (e.g. `elvarsel`) **without** connecting the Git
+  repo (the Action deploys; a Git build would have no data), Framework preset
+  "Other", no build command. Create a token (Account → Tokens). The project's
+  Org ID and Project ID are in Project → Settings → General.
+- **GitHub repo secrets** (Settings → Secrets and variables → Actions):
+  `DATABASE_URL`, `ENTSOE_API_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
+  `VERCEL_PROJECT_ID`. Without the Vercel ones the job still runs and logs
+  forecasts; it just skips the deploy.
+- Then run the workflow once by hand (Actions → Daily forecast + deploy → Run).
+
+Try the static build locally:
+
+```bash
+python -m elvarsel.daily --skip-ingest --export frontend/public/data
+cd frontend && VITE_STATIC_DATA=1 npm run build && npm run preview
+```
+
+The FastAPI service (`Dockerfile`, `uvicorn elvarsel.api.main:app`) stays the
+development backend and the reference for the JSON contract.

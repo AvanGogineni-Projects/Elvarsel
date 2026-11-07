@@ -22,13 +22,23 @@ TABLES: dict[str, list[str]] = {
     "raw_price": ["zone", "time_start", "time_end", "sek_per_kwh", "eur_per_kwh", "exr"],
     "raw_entsoe": ["zone", "metric", "time_start", "value"],
     "raw_weather": ["zone", "reference_time", "time", "air_temperature", "wind_speed"],
+    "raw_nwp": ["zone", "metric", "time_start", "value"],
     "forecast_log": ["zone", "as_of", "target_time", "model_version", "price_eur_mwh"],
 }
 PK: dict[str, list[str]] = {
     "raw_price": ["zone", "time_start"],
     "raw_entsoe": ["zone", "metric", "time_start"],
     "raw_weather": ["zone", "reference_time", "time"],
+    "raw_nwp": ["zone", "metric", "time_start"],
     "forecast_log": ["zone", "as_of", "target_time"],
+}
+
+
+# Tables created on first write (the original raw_* tables were created by hand in Supabase).
+_DDL = {
+    "raw_nwp": """create table if not exists raw_nwp (
+        zone text not null, metric text not null, time_start timestamptz not null,
+        value double precision, primary key (zone, metric, time_start))""",
 }
 
 
@@ -71,6 +81,8 @@ def upsert(df: pd.DataFrame, table: str) -> int:
     # Unique per call: concurrent upserts (12 zones logging forecasts at once) must not share a stage table.
     stage = f"_stage_{table}_{uuid.uuid4().hex[:12]}"
     with _engine().begin() as con:
+        if table in _DDL:
+            con.execute(text(_DDL[table]))
         # Multi-row INSERTs: row-by-row executemany costs a pooler round trip per row (~85s/month of data).
         df.to_sql(stage, con, if_exists="replace", index=False, method="multi", chunksize=1000)
         con.execute(

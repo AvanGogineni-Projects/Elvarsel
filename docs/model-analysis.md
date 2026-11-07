@@ -1,9 +1,13 @@
-# Data analysis & model v2
+# Data analysis & model v2 → v3
 
 _2026-11-07 · 2 years of hourly day-ahead prices (Nov 2024 – Nov 2026) for all 12
 Nordic bidding zones, 17,543 hours each, no gaps._
 
-**Summary.** The original model was benchmarked against a weak baseline (same hour
+> **Latest: model v3** (bottom of this page): one model for all zones with
+> wind/temperature forecasts and holidays. MAE 16.6 vs 25.0 for naive-24
+> (−33.6%, 52 weeks), plus a calibrated 80% range and a daily job.
+
+**Summary (v2).** The original model was benchmarked against a weak baseline (same hour
 **last week**). Against the honest one, same hour **yesterday**, it lost in half
 the zones. Model v2 adds the previous day's price profile and ENTSO-E's
 day-ahead load forecast, trains on the metric we report (L1), fixes a
@@ -223,3 +227,131 @@ model or a bias correction. MAE is the metric we optimise and report.
 - **Holidays** aren't modelled. The weekday/weekend gap (1.2–1.8×) suggests
   public holidays matter; this needs a holiday calendar (new dependency, so
   deferred).
+
+---
+
+# Model v3: seven levers, tested over 52 weeks
+
+v2 left seven ideas open. Each was measured in the same walk-forward backtest
+against v2, over **52 weekly origins** so that Christmas, Easter, Midsummer and
+a full reservoir cycle are inside the test window. 13 weeks was too short to
+judge holidays or reservoirs.
+
+| # | Lever | 52-week MAE | Verdict |
+|---|---|---:|---|
+| — | naive-24 | 25.00 | benchmark |
+| — | v2 | 19.59 | starting point |
+| 1 | **Wind + temperature forecasts (Open-Meteo, issued ≥ 48 h ahead)** | 17.44 | **shipped**: −11% |
+| 5 | **… + one model for all 12 zones** | 16.64 | **shipped**: a further −4.6%, every zone improves |
+| 6 | **… + public holidays** | 16.62 | **shipped**: −5% on holiday days (15.0 → 14.2) |
+| 3 | … + Germany's D-1 price | 16.74 | rejected: slightly worse |
+| 4 | … + hydro reservoir levels | 16.60 | rejected: −0.1%, within noise; not worth a new feed |
+| 7 | Spike risk | — | **shipped** as a calibrated 80% range (4%/96% quantile models) |
+| 2 | Daily job | — | **shipped**: ingest → retrain → forecast → log, 09:15 UTC |
+
+### 1. Wind, done point-in-time
+
+ENTSO-E's wind forecasts are published after the auction gate (§1 above).
+Open-Meteo's *previous-runs* archive stores what weather models forecast
+**two days earlier** ("previous_day2"). For every hour of delivery day D, that
+forecast existed by D-2, before the D-1 12:00 gate. Training and serving use
+the same vintage, so the feature is honest.
+
+The inputs, per zone:
+- wind speed at 100 m, averaged over two points in the zone's main wind area
+  (`config.WIND_SITES`);
+- temperature at the load centre (heating demand);
+- each of these as a daily mean;
+- the change in wind vs the same hour yesterday;
+- a system-wide **Nordic wind** (the mean over all zones), because one zone's
+  price depends on its neighbours' wind too.
+
+The gains are largest in FI (−21%), SE1–SE3 and DK. Norway gains least, as
+expected for hydro.
+
+### 5. One model for all zones
+
+Stacking the 12 zones (about 210k rows) with a `zone_code` category lets the
+model learn shared dynamics, such as how a windy evening moves prices, from
+12× more data. Each zone keeps its own level and shape through the D-1
+features and the zone code. Every zone improved. Serving now trains once
+instead of 12 times.
+
+### 6. Holidays
+
+Flags for "is a public holiday" and "yesterday was a public holiday" use each
+zone's own country calendar (`holidays` package). Overall MAE barely moves,
+because holidays are 3% of hours, but on those hours error drops 5%.
+
+### 3 and 4. Why Germany and reservoirs were dropped
+
+- **Germany:** the D-1 German price is already reflected in the D-1 Nordic
+  prices the model sees. Adding it was slightly worse overall.
+- **Reservoirs:** weekly reservoir filling changes slowly and is
+  already priced into the recent price level (`w1_mean`, `d1_mean`). It
+  added nothing measurable.
+
+Both data paths were tested end to end in scratch code and deliberately not
+built into the pipeline.
+
+### 7. Spikes → a calibrated range
+
+Point accuracy on the top 20% of prices stays close to naive. The honest fix is
+to say how uncertain each hour is, using two extra LightGBM models with a
+quantile objective.
+
+**The textbook setting failed its own test.** Models for the 10th and 90th
+percentiles covered only **67%** of actual prices out of sample, not 80%.
+Prices landed above the band 22% of the time, so upward spikes escaped the
+top. The band was then calibrated empirically: model quantiles at 4% and 96%
+cover **80.3%** over the last 13 weeks (5.7% below, 14.0% above). That setting
+was chosen on those 13 weeks and then checked on the 39 earlier weeks
+and it held: **83.9%** there (6.8% below, 9.3% above), 83.0% over all 52
+weeks. So the range is honest and slightly conservative in calmer periods.
+
+The API returns the band as `low`/`high`. It is not labelled `p10`/`p90`,
+because it isn't literally the 10th/90th percentile, it's a calibrated 80%
+range. The dashboard shades it. Crossing quantiles are ordered so that
+low ≤ point ≤ high. The band is still skewed: misses are more often above it
+than below (spikes), and about half of the top-5% price hours exceed `high`.
+That is the remaining spike problem.
+
+## v3 final results (production code, 52 weekly walk-forward origins)
+
+Reproduce with `python -m elvarsel.models.report --no-track --n-splits 52`
+(writes [backtest-results.md](backtest-results.md)). Each week, one model is
+trained on all history before it, for all 12 zones. MAE in EUR/MWh:
+
+| Zone | v3 MAE | naive-24 MAE | Δ |
+|---|---:|---:|---:|
+| SE1 | 14.3 | 23.2 | −38% |
+| SE2 | 14.4 | 24.3 | −41% |
+| SE3 | 17.7 | 30.0 | −41% |
+| SE4 | 23.0 | 37.0 | −38% |
+| NO4 | 12.5 | 16.6 | −24% |
+| NO3 | 14.3 | 18.6 | −23% |
+| NO5 | 11.8 | 13.8 | −15% |
+| NO1 | 13.4 | 17.9 | −25% |
+| NO2 | 14.8 | 19.0 | −22% |
+| FI | 19.2 | 33.3 | **−42%** |
+| DK1 | 21.1 | 32.1 | −34% |
+| DK2 | 22.5 | 34.2 | −34% |
+| **All** | **16.6** | **25.0** | **−33.6%** |
+
+Over the same 52 weeks v2 scored 19.6, so v3 is **15% better than v2**. The
+original model never beat naive-24 at all.
+
+### Operations (lever 2)
+
+`python -m elvarsel.daily` runs every day at 09:15 UTC
+(`.github/workflows/daily.yml`), before the 12:00 CET gate:
+1. ingest yesterday and today (prices, load, tomorrow's load forecast) and
+   NWP from D-2 to D+2 into the database;
+2. retrain the Nordic model;
+3. log each zone's next-day forecast to `forecast_log`, so live accuracy
+   accrues every day, not only when someone opens the dashboard.
+
+A failing zone is reported and the job exits non-zero, but it never blocks
+the other zones. The API refreshes its model hourly, so it serves the job's
+data. The workflow needs `DATABASE_URL` and `ENTSOE_API_TOKEN` as GitHub repo
+secrets.

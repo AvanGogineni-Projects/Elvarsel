@@ -2,37 +2,100 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Print ledger. Paper, ink and one signal colour; rules instead of cards.
+   These are the All Nordic defaults for first paint; theme.tsx overrides them
+   per country from the flag palettes. RGB triplets so /opacity modifiers work. */
 :root {
+  color-scheme: light;
+  --paper: 242 239 230;
+  --ink-900: 242 239 230; /* page = paper */
+  --ink-800: 247 245 238; /* raised paper (popovers, inputs) */
+  --ink-700: 232 228 216;
+  --ink-600: 20 20 20; /* active control = solid ink */
+  --fg: 20 20 20;
+  --soft: 44 42 38;
+  --mute: 107 103 93;
+  --line: 20 20 20;
+  --line-alpha: 0.85;
+  --signal: 215 38 30;
+  --accent: 215 38 30;
+  --warn: 215 38 30;
+  --ok: 20 20 20;
+  --on-active: 242 239 230;
+  --grain-opacity: 0.06;
+}
+
+.dark {
   color-scheme: dark;
+  --paper: 237 233 222;
+  --ink-900: 21 20 18;
+  --ink-800: 30 29 26;
+  --ink-700: 40 38 34;
+  --ink-600: 237 233 222;
+  --fg: 237 233 222;
+  --soft: 214 209 196;
+  --mute: 150 145 133;
+  --line: 237 233 222;
+  --line-alpha: 0.7;
+  --signal: 255 84 66;
+  --accent: 255 84 66;
+  --warn: 255 84 66;
+  --ok: 237 233 222;
+  --on-active: 21 20 18;
+  --grain-opacity: 0.08;
 }
 
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
-  background: #0b0c0e;
-  color: #eceef1;
-  font-family: Inter, system-ui, sans-serif;
+  color: rgb(var(--fg));
+  background-color: rgb(var(--ink-900));
+  font-family: Archivo, system-ui, sans-serif;
+  font-feature-settings: "ss01";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Thin, quiet scrollbars to match the dark shell. */
+/* Paper grain: a fixed, faint fractal-noise layer, so flat colour reads as print. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.dark body::before {
+  mix-blend-mode: screen;
+}
+
+/* Ledger cells: transparent, defined by rules, never by fills or shadows. */
+.card {
+  background: transparent;
+}
+.rule-dashed {
+  border-style: dashed;
+}
+.caps {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.on-active {
+  color: rgb(var(--on-active));
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-}
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  scrollbar-color: rgb(var(--fg) / 0.25) transparent;
 }
 
 .tabular {

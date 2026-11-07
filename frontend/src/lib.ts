@@ -1,4 +1,26 @@
-import type { Accuracy, Forecast } from "./api";
+import type { Accuracy, Forecast, Fx } from "./api";
+
+export type Unit = "MWh" | "kWh";
+
+// Consumer prices are quoted in the minor unit per kWh (Swedish öre, Danish/Norwegian øre, euro cents).
+const MINOR: Record<string, string> = { SEK: "öre", NOK: "øre", DKK: "øre", EUR: "c" };
+
+export interface Money {
+  currency: string; // the currency actually used (falls back to EUR without FX)
+  label: string; // e.g. "SEK/MWh", "öre/kWh"
+  digits: number;
+  conv: (eurPerMwh: number) => number;
+}
+
+// EUR/MWh -> display currency and unit. Per kWh in minor units: x rate / 1000 kWh x 100 minor = x rate / 10.
+export function money(currency: string, unit: Unit, fx: Fx | null): Money {
+  const rate = currency === "EUR" ? 1 : fx?.rates[currency];
+  if (rate == null) return money("EUR", unit, fx);
+  if (unit === "kWh") {
+    return { currency, label: `${MINOR[currency] ?? currency}/kWh`, digits: 1, conv: (v) => (v * rate) / 10 };
+  }
+  return { currency, label: `${currency}/MWh`, digits: currency === "EUR" ? 1 : 0, conv: (v) => v * rate };
+}
 
 // Live model health from matured forecasts. "skewed" = |bias| > half the MAE:
 // errors lean one way (systematic over/under-forecast), not random noise.

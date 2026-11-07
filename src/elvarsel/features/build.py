@@ -71,9 +71,12 @@ def _read(source: str, zone: str, empty_cols: list[str]) -> pd.DataFrame:
 
 # ---- series builders ------------------------------------------------------
 
+# Empty but UTC-time-indexed, so a zone with no data flows through as "no rows", not a crash.
+_EMPTY_HOURLY = pd.Series(dtype="float64", index=pd.DatetimeIndex([], tz="UTC"))
+
 def hourly_price(raw: pd.DataFrame) -> pd.Series:
     if raw.empty:
-        return pd.Series(dtype="float64", name="price_eur_mwh")
+        return _EMPTY_HOURLY.rename("price_eur_mwh")
     s = raw.set_index("time_start").sort_index()["eur_per_kwh"].mul(1000.0)
     s = s.resample("1h").mean()
     s.name = "price_eur_mwh"
@@ -83,7 +86,7 @@ def hourly_price(raw: pd.DataFrame) -> pd.Series:
 def hourly_load(entsoe_raw: pd.DataFrame) -> pd.Series:
     load = entsoe_raw[entsoe_raw["metric"] == "load_mw"]
     if load.empty:
-        return pd.Series(dtype="float64", name="load_mw")
+        return _EMPTY_HOURLY.rename("load_mw")
     s = load.set_index("time_start").sort_index()["value"].resample("1h").mean()
     s.name = "load_mw"
     return s

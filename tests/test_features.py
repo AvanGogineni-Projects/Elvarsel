@@ -100,3 +100,9 @@ def test_weather_absent_leaves_nan_columns():
     df = build.build_features(_raw_15min(12), "SE3", weather_raw=pd.DataFrame())
     # empty weather -> columns simply not added, no crash
     assert "air_temperature" not in df.columns
+
+
+def test_zone_without_prices_builds_an_empty_table_not_a_crash():
+    empty = pd.DataFrame(columns=["time_start", "eur_per_kwh"])
+    df = build.build_features(empty, "FI")
+    assert df.empty  # train_model turns this into "no data" (API 503) instead of a 500

@@ -77,6 +77,7 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         "bias": None,
         "by_horizon": [],
         "points": [],
+        "baseline_mae": None,
     }
     if log.empty or realized.empty:
         return empty
@@ -98,11 +99,16 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": len(g)}
         for h, g in sorted(df.groupby("h"), key=lambda kv: kv[0])
     ]
+    # Seasonal-naive baseline (same hour last week), as in the backtest: the model must beat it.
+    df["baseline"] = realized.reindex(pd.DatetimeIndex(df["target_time"]) - pd.Timedelta(days=7)).to_numpy()
+    has_base = df.dropna(subset=["baseline"])
     # Forecast vs actual per hour for charting; if an hour was forecast more than once, show the latest.
     latest = df.sort_values("as_of").drop_duplicates("target_time", keep="last").sort_values("target_time")
     points = [
-        {"time": t.isoformat(), "forecast": float(f), "actual": float(a)}
-        for t, f, a in zip(latest["target_time"], latest["price_eur_mwh"], latest["actual"], strict=True)
+        {"time": t.isoformat(), "forecast": float(f), "actual": float(a), "baseline": None if pd.isna(b) else float(b)}
+        for t, f, a, b in zip(
+            latest["target_time"], latest["price_eur_mwh"], latest["actual"], latest["baseline"], strict=True
+        )
     ]
     return {
         "n": len(df),
@@ -112,6 +118,9 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         "bias": float((p - y).mean()),  # +ve = model over-forecasts
         "by_horizon": by_horizon,
         "points": points,
+        "baseline_mae": metrics.mae(has_base["actual"].to_numpy(), has_base["baseline"].to_numpy())
+        if len(has_base)
+        else None,
     }
 
 
@@ -119,7 +128,7 @@ def accuracy(zone: str, days: int = 7) -> dict:
     """Live accuracy for a zone over the last `days` of logged forecasts."""
     base = {"zone": zone, "window_days": days, "unit": "EUR/MWh"}
     if not storage.enabled():
-        return {**base, "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": []}
+        return {**base, "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": [], "baseline_mae": None}
     ensure_table()
     log = _read_log(zone, days)
     realized = build.hourly_price(build.load_prices(zone))

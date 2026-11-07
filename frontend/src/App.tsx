@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { ZONES, ZONE_META, type Zone } from "./api";
+import { useMemo, useState } from "react";
+import { COUNTRY_NAME, zoneColor, type Zone } from "./api";
+import Controls from "./components/Controls";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
 import ZoneTile from "./components/ZoneTile";
-import { eur, relTime, stats } from "./lib";
-import { useDashboard, type Health } from "./useDashboard";
+import { eur, money as makeMoney, relTime, stats, type Unit } from "./lib";
+import { useDashboard, useZoneHistory, type Health } from "./useDashboard";
 
 const STATUS: Record<Health, { label: string; dot: string }> = {
   live: { label: "Live", dot: "bg-ok" },
@@ -13,15 +14,45 @@ const STATUS: Record<Health, { label: string; dot: string }> = {
 };
 
 export default function App() {
-  const { forecasts, accuracy, health, lastUpdated, loading, refresh } = useDashboard();
-  const [selected, setSelected] = useState<Zone>("SE3");
-  const ready = ZONES.every((z) => forecasts[z] !== null);
-  const all = forecasts as Record<Zone, NonNullable<(typeof forecasts)[Zone]>>;
+  const { zones, fx, forecasts, accuracy, health, lastUpdated, loading, refresh } = useDashboard();
+  const [country, setCountry] = useState("SE");
+  const [currency, setCurrency] = useState("SEK");
+  const [unit, setUnit] = useState<Unit>("MWh");
+  const [hidden, setHidden] = useState<Set<Zone>>(new Set());
+  const [selectedRaw, setSelected] = useState<Zone>("SE3");
+  const [days, setDays] = useState(30);
 
-  const day = ready
-    ? new Date(all.SE1.as_of).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+  const countries = [...new Set(zones.map((z) => z.country))];
+  const visible = zones.filter((z) => country === "ALL" || z.country === country);
+  const ready = lastUpdated !== null;
+  const codes = visible.map((z) => z.code).filter((z) => forecasts[z]); // zones with data
+  const selected = codes.includes(selectedRaw) ? selectedRaw : codes[0];
+  const selectedInfo = zones.find((z) => z.code === selected);
+
+  // Display currencies: EUR plus every local currency we have an ECB rate for.
+  const currencies = ["EUR", ...new Set(zones.map((z) => z.currency).filter((c) => c !== "EUR" && fx?.rates[c]))];
+  const money = useMemo(() => makeMoney(currency, unit, fx), [currency, unit, fx]);
+  const history = useZoneHistory(selected ?? "", days, health === "live" && !!selected);
+
+  // One country -> its own currency; several countries -> EUR, the market's common unit.
+  const pickCountry = (c: string) => {
+    setCountry(c);
+    const local = zones.find((z) => z.country === c)?.currency;
+    setCurrency(c === "ALL" || !local || !currencies.includes(local) ? "EUR" : local);
+  };
+  const toggle = (z: Zone) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.has(z) ? next.delete(z) : next.add(z);
+      return next;
+    });
+
+  const first = codes.length ? forecasts[codes[0]] : null;
+  const day = first
+    ? new Date(first.as_of).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
     : null;
-  const byAvg = ready ? ZONES.map((z) => ({ z, avg: stats(all[z]).avg })).sort((a, b) => a.avg - b.avg) : [];
+  const byAvg = codes.map((z) => ({ z, avg: stats(forecasts[z]!).avg })).sort((a, b) => a.avg - b.avg);
+  const scope = country === "ALL" ? "the Nordic market" : COUNTRY_NAME[country] ?? country;
 
   return (
     <div className="min-h-screen">
@@ -29,7 +60,7 @@ export default function App() {
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-baseline gap-3">
             <span className="text-lg font-semibold tracking-tight text-white">Elvarsel</span>
-            <span className="text-sm text-mute">Swedish day-ahead price forecasts</span>
+            <span className="text-sm text-mute">Nordic day-ahead price forecasts</span>
           </div>
           <div className="flex items-center gap-3 text-xs text-mute">
             <span className="flex items-center gap-1.5">
@@ -51,56 +82,98 @@ export default function App() {
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
             {day ? `Forecast for ${day}` : "Loading forecast…"}
           </h1>
-          {byAvg.length > 0 && (
+          {byAvg.length > 1 && (
             <p className="mt-2 text-sm text-mute">
-              Cheapest{" "}
-              <span style={{ color: ZONE_META[byAvg[0].z].accent }}>{byAvg[0].z}</span>{" "}
-              <span className="font-mono text-soft">{eur(byAvg[0].avg, 1)}</span> · priciest{" "}
-              <span style={{ color: ZONE_META[byAvg[3].z].accent }}>{byAvg[3].z}</span>{" "}
-              <span className="font-mono text-soft">{eur(byAvg[3].avg, 1)}</span> EUR/MWh average. Prices rise north → south.
+              Across {scope}: cheapest{" "}
+              <span style={{ color: zoneColor(byAvg[0].z) }}>{byAvg[0].z}</span>{" "}
+              <span className="font-mono text-soft">{eur(money.conv(byAvg[0].avg), money.digits)}</span>, priciest{" "}
+              <span style={{ color: zoneColor(byAvg[byAvg.length - 1].z) }}>{byAvg[byAvg.length - 1].z}</span>{" "}
+              <span className="font-mono text-soft">{eur(money.conv(byAvg[byAvg.length - 1].avg), money.digits)}</span>{" "}
+              {money.label} average.
             </p>
           )}
         </section>
 
-        <section className="mt-6 rounded-lg border border-line bg-ink-800 p-4 sm:p-5">
-          <div className="mb-3 flex items-baseline justify-between">
+        <div className="mt-5">
+          <Controls
+            countries={countries}
+            country={country}
+            onCountry={pickCountry}
+            currencies={currencies}
+            currency={money.currency}
+            onCurrency={setCurrency}
+            unit={unit}
+            onUnit={setUnit}
+            fxDate={money.currency !== "EUR" ? fx?.date ?? null : null}
+          />
+        </div>
+
+        <section className="mt-4 rounded-lg border border-line bg-ink-800 p-4 sm:p-5">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 className="text-sm font-medium text-soft">
-              All zones, hourly <span className="font-normal text-mute">· EUR/MWh</span>
+              Next-day hourly forecast <span className="font-normal text-mute">· {money.label}</span>
             </h2>
-            <span className="text-xs text-mute">click a line or tile for detail</span>
+            <span className="hidden text-xs text-mute sm:inline">click a line or tile for detail · chips show/hide zones</span>
           </div>
-          {ready ? (
-            <OverviewChart forecasts={all} selected={selected} onSelect={setSelected} />
+          {ready && codes.length ? (
+            <OverviewChart
+              zones={codes}
+              hidden={hidden}
+              forecasts={forecasts as Record<Zone, NonNullable<(typeof forecasts)[Zone]>>}
+              selected={selected}
+              money={money}
+              onSelect={setSelected}
+              onToggle={toggle}
+            />
+          ) : ready ? (
+            <div className="grid h-[330px] place-items-center text-sm text-mute">No zone in this filter has data yet.</div>
           ) : (
-            <div className="h-[300px] animate-pulse rounded-md bg-ink-700/50" />
+            <div className="h-[330px] animate-pulse rounded-md bg-ink-700/50" />
           )}
         </section>
 
-        <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {ZONES.map((z) =>
-            ready ? (
+        <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
+            ready && z && !forecasts[z.code] ? (
+              <div key={z.code} className="flex flex-col rounded-lg border border-dashed border-line p-4 text-xs text-mute">
+                <span className="font-mono text-sm font-semibold" style={{ color: zoneColor(z.code) }}>{z.code}</span>
+                <span>{z.city}</span>
+                <span className="mt-auto pt-6">No data yet: backfill pending</span>
+              </div>
+            ) : ready && z ? (
               <ZoneTile
-                key={z}
+                key={z.code}
                 zone={z}
-                forecast={all[z]}
-                accuracy={accuracy[z]}
-                selected={z === selected}
-                onSelect={() => setSelected(z)}
+                forecast={forecasts[z.code]!}
+                accuracy={accuracy[z.code] ?? null}
+                money={money}
+                selected={z.code === selected}
+                onSelect={() => setSelected(z.code)}
               />
             ) : (
-              <div key={z} className="h-[170px] animate-pulse rounded-lg border border-line bg-ink-800" />
+              <div key={z?.code ?? i} className="h-[160px] animate-pulse rounded-lg border border-line bg-ink-800" />
             )
           )}
         </section>
 
-        {ready && (
+        {ready && selectedInfo && forecasts[selected] && (
           <div className="mt-4">
-            <ZoneDetail zone={selected} forecast={all[selected]} accuracy={accuracy[selected]} />
+            <ZoneDetail
+              zone={selectedInfo}
+              forecast={forecasts[selected]!}
+              prices={history.prices}
+              accuracy={history.acc}
+              loading={history.loading}
+              days={days}
+              onDays={setDays}
+              money={money}
+            />
           </div>
         )}
 
         <footer className="mt-10 text-xs text-mute">
-          LightGBM per zone · refreshes every 60 s · EUR/MWh · times in your local zone
+          LightGBM per bidding zone · prices settle in EUR; local currency via ECB reference rate · refreshes every 60 s
+          · times in your local zone
         </footer>
       </div>
     </div>

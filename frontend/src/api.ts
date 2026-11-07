@@ -42,6 +42,18 @@ export interface Status {
   models: Record<string, string>;
 }
 
+export interface Accuracy {
+  zone: string;
+  window_days: number;
+  unit: string;
+  n: number; // matured points scored
+  n_logged: number; // forecasts logged (may not have matured yet)
+  mae: number | null;
+  rmse: number | null;
+  bias: number | null; // +ve = model over-forecasts
+  by_horizon: { h: number; mae: number; n: number }[];
+}
+
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { signal });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -54,6 +66,10 @@ export function fetchForecast(zone: Zone, signal?: AbortSignal) {
 
 export function fetchStatus(signal?: AbortSignal) {
   return getJSON<Status>(`/v1/status`, signal);
+}
+
+export function fetchAccuracy(zone: Zone, days = 7, signal?: AbortSignal) {
+  return getJSON<Accuracy>(`/v1/accuracy?zone=${zone}&days=${days}`, signal);
 }
 
 export function fetchHealth(signal?: AbortSignal) {

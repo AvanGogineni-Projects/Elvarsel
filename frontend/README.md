@@ -44,6 +44,10 @@ The dashboard calls:
 
 - `GET /v1/forecast?zone=SE1..SE4` — 24 hourly points for the next day
 - `GET /v1/status` — service + per-zone model versions
+- `GET /v1/accuracy?zone=SE1..SE4&days=7` — live model health (MAE / RMSE /
+  bias over matured forecasts). Each card shows a model-health row: live MAE +
+  bias once forecasts have matured (24h+ and actuals landed), otherwise
+  "Awaiting actuals · N forecasts logged".
 
 If a zone's forecast request fails (backend not running), that zone falls back
 to **deterministic mock data** (a realistic Nordic double-peak daily curve) so

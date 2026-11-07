@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  fetchAccuracy,
   fetchForecast,
   fetchStatus,
   mockForecast,
   ZONES,
+  type Accuracy,
   type Forecast,
   type Status,
   type Zone,
@@ -13,6 +15,7 @@ export type Health = "live" | "mock" | "loading";
 
 export interface DashboardState {
   forecasts: Record<Zone, Forecast | null>;
+  accuracy: Record<Zone, Accuracy | null>;
   status: Status | null;
   health: Health;
   lastUpdated: number | null;
@@ -24,6 +27,12 @@ const REFRESH_MS = 60_000; // monitoring cadence
 
 export function useDashboard(): DashboardState {
   const [forecasts, setForecasts] = useState<Record<Zone, Forecast | null>>({
+    SE1: null,
+    SE2: null,
+    SE3: null,
+    SE4: null,
+  });
+  const [accuracy, setAccuracy] = useState<Record<Zone, Accuracy | null>>({
     SE1: null,
     SE2: null,
     SE3: null,
@@ -78,6 +87,24 @@ export function useDashboard(): DashboardState {
     setHealth(anyLive ? "live" : "mock");
     setLastUpdated(Date.now());
     setLoading(false);
+
+    // Accuracy is best-effort and only meaningful against a live backend;
+    // failures (or mock mode) leave the panel in its "awaiting actuals" state.
+    if (anyLive) {
+      const accResults = await Promise.all(
+        ZONES.map(async (zone): Promise<[Zone, Accuracy | null]> => {
+          try {
+            return [zone, await fetchAccuracy(zone, 7, ac.signal)];
+          } catch {
+            return [zone, null];
+          }
+        })
+      );
+      if (ac.signal.aborted) return;
+      const accNext = {} as Record<Zone, Accuracy | null>;
+      for (const [zone, a] of accResults) accNext[zone] = a;
+      setAccuracy(accNext);
+    }
   }, []);
 
   useEffect(() => {
@@ -89,5 +116,5 @@ export function useDashboard(): DashboardState {
     };
   }, [load]);
 
-  return { forecasts, status, health, lastUpdated, loading, refresh: load };
+  return { forecasts, accuracy, status, health, lastUpdated, loading, refresh: load };
 }

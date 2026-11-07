@@ -41,6 +41,7 @@ def test_forecast_endpoint_shape(monkeypatch):
     fake_df = pd.DataFrame({"time": times, "price_eur_mwh": np.linspace(50, 70, 24)})
     monkeypatch.setitem(main._CACHE, "SE3", ("model", ["f"], "lgbm-SE3-test"))
     monkeypatch.setattr(main.fc, "forecast_next_day", lambda z, m, f: fake_df)
+    monkeypatch.setattr(main.monitoring, "log_forecast", lambda *a, **k: 0)
 
     body = TestClient(main.app).get("/v1/forecast", params={"zone": "SE3"}).json()
     assert body["zone"] == "SE3"

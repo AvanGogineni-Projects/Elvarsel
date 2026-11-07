@@ -6,7 +6,7 @@ import ZoneCard from "./components/ZoneCard";
 import { useDashboard } from "./useDashboard";
 
 export default function App() {
-  const { forecasts, status, health, lastUpdated, loading, refresh } = useDashboard();
+  const { forecasts, accuracy, status, health, lastUpdated, loading, refresh } = useDashboard();
   const ready = ZONES.every((z) => forecasts[z] !== null);
 
   return (
@@ -45,7 +45,13 @@ export default function App() {
         <section className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
           {ready
             ? ZONES.map((z, i) => (
-                <ZoneCard key={z} zone={z} forecast={forecasts[z]!} index={i} />
+                <ZoneCard
+                  key={z}
+                  zone={z}
+                  forecast={forecasts[z]!}
+                  accuracy={accuracy[z]}
+                  index={i}
+                />
               ))
             : ZONES.map((z) => (
                 <div

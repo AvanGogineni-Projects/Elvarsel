@@ -68,7 +68,7 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
     `realized` is the actual hourly EUR/MWh series indexed by UTC hour.
     Only matured points (an actual exists for target_time) are scored.
     """
-    n_logged = int(len(log))
+    n_logged = len(log)
     empty = {
         "n": 0,
         "n_logged": n_logged,
@@ -94,11 +94,11 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
     df["h"] = ((df["target_time"] - df["as_of"]) / pd.Timedelta(hours=1)).round().astype(int)
 
     by_horizon = [
-        {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": int(len(g))}
+        {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": len(g)}
         for h, g in sorted(df.groupby("h"), key=lambda kv: kv[0])
     ]
     return {
-        "n": int(len(df)),
+        "n": len(df),
         "n_logged": n_logged,
         "mae": metrics.mae(y, p),
         "rmse": metrics.rmse(y, p),

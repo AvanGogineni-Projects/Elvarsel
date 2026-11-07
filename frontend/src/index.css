@@ -89,8 +89,13 @@ body::before {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.on-active {
-  color: rgb(var(--on-active));
+/* In the utilities layer so variants work: `hover:on-active` flips text to the
+   background colour on a solid-ink hover. As a plain class, Tailwind generated no
+   hover variant, so hovered buttons showed paper-on-paper (invisible) text. */
+@layer utilities {
+  .on-active {
+    color: rgb(var(--on-active));
+  }
 }
 
 * {

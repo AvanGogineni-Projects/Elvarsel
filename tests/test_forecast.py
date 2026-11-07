@@ -11,8 +11,9 @@ from elvarsel.models import forecast as fc
 def synthetic_sources(monkeypatch):
     idx = pd.date_range("2026-05-01T00:00:00Z", periods=20 * 96, freq="15min", tz="UTC")
     price = pd.DataFrame({"time_start": idx, "eur_per_kwh": (50.0 + idx.hour) / 1000.0})
-    monkeypatch.setattr(build, "load_prices", lambda z: price)
-    monkeypatch.setattr(build, "load_entsoe", lambda z: pd.DataFrame())
+    entsoe = pd.DataFrame({"time_start": idx, "metric": build.PRICE_METRIC, "value": 50.0 + idx.hour})
+    monkeypatch.setattr(build, "load_prices", lambda z, since=None: price)  # Swedish zones (Elpris)
+    monkeypatch.setattr(build, "load_entsoe", lambda z, since=None, metrics=None: entsoe)  # the rest
     monkeypatch.setattr(build, "load_nwp", lambda z: pd.DataFrame())
 
 

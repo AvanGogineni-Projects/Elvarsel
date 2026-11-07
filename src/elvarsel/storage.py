@@ -108,17 +108,17 @@ def upsert(df: pd.DataFrame, table: str) -> int:
 
 
 def read_zone(
-    table: str, zone: str, *, since: pd.Timestamp | None = None, metric: str | None = None
+    table: str, zone: str, *, since: pd.Timestamp | None = None, metrics: tuple[str, ...] | None = None
 ) -> pd.DataFrame:
-    """A zone's rows; `since` / `metric` narrow the read in SQL (the API reads a
-    window, not ~100k rows of history, so serverless requests stay fast)."""
+    """A zone's rows; `since` / `metrics` narrow the read in SQL (the API reads a
+    window, training reads only the metrics it uses, not every stored series)."""
     from sqlalchemy import text
 
     sql, params = f"select * from {table} where zone = :z", {"z": zone}
     if since is not None:
         sql, params["since"] = sql + " and time_start >= :since", since
-    if metric is not None:
-        sql, params["m"] = sql + " and metric = :m", metric
+    if metrics is not None:
+        sql, params["ms"] = sql + " and metric = any(:ms)", list(metrics)
     return pd.read_sql(text(sql), _engine(), params=params)
 
 

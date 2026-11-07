@@ -7,6 +7,8 @@ training; their lags all point back into known history.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 from lightgbm import LGBMRegressor
 
@@ -29,7 +31,10 @@ def train_and_forecast_all(*, horizon: int = 24) -> tuple[str, dict[str, pd.Data
     no data are absent. Pooling 12 zones beat 12 separate models in every zone
     (52-week backtest, docs/model-analysis.md).
     """
-    frames = {z: df for z in config.ZONES if not (df := build.load_features(z, horizon)).empty}
+    # History reads are network-bound: load zones concurrently (<= the engine's pool).
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        loaded = dict(zip(config.ZONES, pool.map(lambda z: build.load_features(z, horizon), config.ZONES)))
+    frames = {z: df for z, df in loaded.items() if not df.empty}  # keeps config.ZONES order
     if not frames:
         raise ValueError("no data for any zone")
     allf = build.stack(frames)

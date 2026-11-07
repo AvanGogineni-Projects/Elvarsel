@@ -168,3 +168,7 @@ def test_holiday_flags_use_the_zone_country_and_local_date():
     assert (df[(local.month == 12) & (local.day == 28)]["holiday_d1"] == 0).all()
     assert (df[(local.month == 12) & (local.day == 27)]["holiday_d1"] == 1).all()  # Dec 26 is a SE holiday
     assert "holiday" in build.feature_columns(df)
+
+
+def test_zone_without_entsoe_rows_yields_no_prices_not_a_crash():
+    assert build.entsoe_prices(pd.DataFrame()).empty

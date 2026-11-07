@@ -32,7 +32,7 @@ def test_forecast_503_when_zone_has_no_data(monkeypatch):
         raise ValueError(f"no data for {zone}")
 
     main._CACHE.pop("DK1", None)
-    monkeypatch.setattr(main.fc, "train_model", no_data)
+    monkeypatch.setattr(main.fc, "train_and_forecast", no_data)
     r = TestClient(main.app).get("/v1/forecast", params={"zone": "DK1"})
     assert r.status_code == 503
     assert "no data" in r.json()["detail"]

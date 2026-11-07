@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from elvarsel.features import build
 
@@ -61,17 +62,17 @@ def _entsoe_load_15min(days: int, start="2026-05-01T00:00:00Z") -> pd.DataFrame:
     )
 
 
-def test_load_lags_are_past_values():
+def test_load_lags_are_past_values_and_skip_post_gate_hours():
     price = _raw_15min(12)
     load = _entsoe_load_15min(12)
     df = build.build_features(price, "SE3", entsoe_raw=load)
 
     feats = build.feature_columns(df)
-    assert {"load_lag_24h", "load_lag_168h"}.issubset(feats)
-    # load_lag_24h at t equals hourly load at t-24h (hourly load value == 1000 + hour)
-    local_utc_hour = df.index.hour
-    expected = 1000.0 + ((local_utc_hour - 24) % 24)  # load depends on UTC hour only
-    assert np.allclose(df["load_lag_24h"].to_numpy(), expected)
+    assert {"load_lag_48h", "load_lag_168h", "d2_load_mean"}.issubset(feats)
+    # Actual load for D-1 afternoon is published after the D-1 12:00 gate -> no 24h load lag.
+    assert "load_lag_24h" not in feats
+    # load_lag_48h at t equals hourly load at t-48h (hourly load value == 1000 + UTC hour)
+    assert np.allclose(df["load_lag_48h"].to_numpy(), 1000.0 + df.index.hour)
 
 
 def test_weather_join_excludes_snapshots_after_day_ahead_gate():
@@ -105,4 +106,54 @@ def test_weather_absent_leaves_nan_columns():
 def test_zone_without_prices_builds_an_empty_table_not_a_crash():
     empty = pd.DataFrame(columns=["time_start", "eur_per_kwh"])
     df = build.build_features(empty, "FI")
-    assert df.empty  # train_model turns this into "no data" (API 503) instead of a 500
+    assert df.empty  # train_and_forecast turns this into "no data" (API 503) instead of a 500
+
+
+def _raw_hourly(values, start="2026-05-01T00:00:00Z") -> pd.DataFrame:
+    idx = pd.date_range(start, periods=len(values), freq="1h", tz="UTC")
+    return pd.DataFrame({"time_start": idx, "eur_per_kwh": np.asarray(values, dtype=float) / 1000.0})
+
+
+def test_previous_day_stats_use_only_the_prior_local_day():
+    rng = np.random.default_rng(0)
+    raw = _raw_hourly(rng.uniform(0, 200, 14 * 24))
+    df = build.build_features(raw, "SE3")
+    price = build.hourly_price(raw)
+    day = price.index.tz_convert("Europe/Stockholm").tz_localize(None).normalize()
+    t = df.index[50]
+    d = t.tz_convert("Europe/Stockholm").tz_localize(None).normalize() - pd.Timedelta(days=1)
+    prev = price[day == d]
+    assert len(prev) == 24
+    assert df.loc[t, "d1_mean"] == pytest.approx(prev.mean())
+    assert df.loc[t, "d1_max"] == pytest.approx(prev.max())
+    assert df.loc[t, "d1_last"] == pytest.approx(prev.iloc[-1])
+
+
+def test_serving_rows_match_training_rows():
+    """Future rows built with horizon=24 from history up to day D-1 must equal the
+    rows the training table builds for day D: no train/serve skew."""
+    rng = np.random.default_rng(1)
+    raw = _raw_hourly(rng.uniform(0, 200, 15 * 24), start="2026-05-01T22:00:00Z")  # local midnight
+    full = build.build_features(raw, "SE3")
+    cut = raw.iloc[: 14 * 24]
+    served = build.build_features(cut, "SE3", horizon=24)
+    future = served[served["target"].isna()]
+    assert len(future) == 24
+    cols = build.feature_columns(full)
+    pd.testing.assert_frame_equal(future[cols], full.loc[future.index, cols], check_freq=False)
+
+
+def test_fundamentals_use_only_the_gate_safe_load_forecast():
+    price = _raw_15min(12)
+    idx = pd.date_range("2026-05-01T00:00:00Z", periods=12 * 24, freq="1h", tz="UTC")
+    rows = [("load_forecast_mw", 5000.0), ("wind_forecast_mw", 1200.0), ("solar_forecast_mw", 300.0)]
+    ent = pd.concat(
+        [pd.DataFrame({"time_start": idx, "zone": "SE3", "metric": m, "value": v}) for m, v in rows]
+        + [_entsoe_load_15min(12)],
+        ignore_index=True,
+    )
+    df = build.build_features(price, "SE3", entsoe_raw=ent)
+    assert (df["load_fc"] == 5000.0).all() and (df["load_fc_day_mean"] == 5000.0).all()
+    assert (df["load_fc_vs_d1"] == 0.0).all()
+    # Wind/solar day-ahead forecasts are published after the 12:00 gate -> never features.
+    assert not any("wind" in c or "solar" in c for c in build.feature_columns(df))

@@ -1,8 +1,10 @@
 """FastAPI service: health + versioned forecast API.
 
-Models are trained lazily per zone on first request and cached in-process
-(training on ~700 rows is sub-second). A later phase swaps this for a model
-registry; the HTTP contract stays the same.
+Models are trained lazily per zone on first request, and the next-day forecast
+is cached in-process with them: one history load per zone per process, not per
+request (a zone's history is ~110k rows; reloading it on every dashboard refresh
+exhausted the DB pool). A later phase swaps this for a model registry and a
+scheduled job; the HTTP contract stays the same.
 
     uvicorn elvarsel.api.main:app --reload
 """
@@ -30,14 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# zone -> (model, feature_cols, version)
-_CACHE: dict[str, tuple] = {}
+# zone -> (model version, next-day forecast frame)
+_CACHE: dict[str, tuple[str, pd.DataFrame]] = {}
 
 
-def _model(zone: str):
+def _model(zone: str) -> tuple[str, pd.DataFrame]:
     if zone not in _CACHE:
         try:
-            _CACHE[zone] = fc.train_model(zone)
+            _CACHE[zone] = fc.train_and_forecast(zone)
         except ValueError as e:  # no price history yet (e.g. a zone not backfilled)
             raise HTTPException(status_code=503, detail=str(e)) from e
     return _CACHE[zone]
@@ -56,8 +58,7 @@ def health() -> dict[str, str]:
 @app.get("/v1/forecast")
 def forecast(zone: str = Query(..., description="bidding zone, e.g. SE3, NO1, DK2, FI")) -> dict:
     _known(zone)
-    model, feats, version = _model(zone)
-    df = fc.forecast_next_day(zone, model, feats)
+    version, df = _model(zone)
     as_of = df["time"].iloc[0].isoformat()
     points = [
         {"time": t.isoformat(), "price_eur_mwh": round(float(p), 2)}
@@ -118,5 +119,5 @@ def status() -> dict:
         "service": "elvarsel",
         "version": __version__,
         "zones": list(config.ZONES),
-        "models": {z: v for z, (_, _, v) in _CACHE.items()},
+        "models": {z: v for z, (v, _) in _CACHE.items()},
     }

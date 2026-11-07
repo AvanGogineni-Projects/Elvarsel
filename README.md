@@ -16,7 +16,7 @@ Phase 0 — backend + data ingestion. Three data sources:
 |---|---|---|
 | Elprisetjustnu.se | Spot price per zone | keyless |
 | SMHI (snow1g) | Weather forecast (temp, wind, …) per zone | keyless |
-| ENTSO-E | Day-ahead price + load | needs `ENTSOE_API_TOKEN` |
+| ENTSO-E | Day-ahead price, load, and day-ahead load/wind/solar forecasts | needs `ENTSOE_API_TOKEN` |
 
 ## Setup
 
@@ -53,7 +53,13 @@ python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-0
 
 # Backfill years of history straight into the database (hourly, resumable)
 python -m elvarsel.ingest.backfill --years 2
+python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
 ```
+
+**Model:** LightGBM per zone, beating "same hour yesterday" by 23.6% MAE over a
+13-week walk-forward backtest (all 12 zones). See
+[docs/model-analysis.md](docs/model-analysis.md) for the data analysis and
+[docs/backtest-results.md](docs/backtest-results.md) for per-zone numbers.
 
 Elpris covers Sweden only (native SEK); NO/DK/FI zones price from ENTSO-E.
 

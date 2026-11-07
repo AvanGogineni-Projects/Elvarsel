@@ -27,9 +27,9 @@ def _feature_df(days: int) -> pd.DataFrame:
     return build.build_features(raw, "SE3")
 
 
-def test_seasonal_naive_is_week_lag():
+def test_naive_is_previous_day_same_hour():
     df = _feature_df(12)
-    assert baseline.seasonal_naive(df).equals(df["lag_168h"])
+    assert baseline.naive(df).equals(df["lag_24h"])
 
 
 def test_evaluate_runs_and_returns_scores():

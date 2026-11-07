@@ -55,7 +55,7 @@ export default function ZoneTile({ zone, forecast, accuracy, money, selected, on
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-line pt-3 text-xs">
         <span className={`truncate ${h.className}`}>● {h.label}</span>
         {beats != null && (
-          <span className={`font-mono ${beats ? "text-ok" : "text-warn"}`} title="live MAE vs seasonal-naive baseline">
+          <span className={`font-mono ${beats ? "text-ok" : "text-warn"}`} title="live MAE vs naive baseline (same hour yesterday)">
             {beats ? "beats naive" : "naive wins"}
           </span>
         )}

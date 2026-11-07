@@ -6,7 +6,14 @@ resample leaves it unchanged and the hourly→15-min regime change disappears.
 
 Point-in-time rule: every feature must be knowable before the forecast is made.
 Day-ahead prices for day D are set at the ~12:00 CET gate on D-1, so:
-  - price/load features are lags >= 24h (never the contemporaneous value);
+  - prices: all of D-1 is known (published on D-2), so same-hour lags >= 24h and
+    D-1 daily stats (mean/min/max/std/last hour) are admissible;
+  - actual load: only up to ~D-1 morning is published at the gate, so load uses
+    lags >= 48h and the D-2 daily mean (a 24h load lag would leak post-gate hours);
+  - fundamentals: ENTSO-E's day-ahead *load forecast* for the target hour (due 2h
+    before the gate). Wind/solar day-ahead forecasts are ingested but NOT used:
+    they are due by 18:00 D-1 — after the gate — and for SE/DK/FI they are not
+    yet published at the gate in practice, so using them would leak;
   - weather uses only SMHI snapshots issued at/before that gate (see _da_cutoff).
 The contemporaneous price is the target, never a feature.
 
@@ -21,9 +28,10 @@ import pandas as pd
 
 from elvarsel import config, storage
 
-PRICE_LAGS: tuple[int, ...] = (24, 48, 168)
-LOAD_LAGS: tuple[int, ...] = (24, 48, 168)
+PRICE_LAGS: tuple[int, ...] = (24, 48, 72, 144, 168)
+LOAD_LAGS: tuple[int, ...] = (48, 168)
 WEATHER_FIELDS: tuple[str, ...] = ("air_temperature", "wind_speed")
+LOAD_FORECAST = "load_forecast_mw"
 
 _META = {"price_eur_mwh", "target", "zone"}
 
@@ -107,13 +115,20 @@ def build_features(
     *,
     entsoe_raw: pd.DataFrame | None = None,
     weather_raw: pd.DataFrame | None = None,
+    horizon: int = 0,
 ) -> pd.DataFrame:
     """Supervised table: target + features, indexed by UTC hour.
 
+    `horizon` > 0 appends that many future hours (target NaN, features filled) —
+    the rows the serving path predicts, built by the same code as training rows.
     Price lags gate warm-up (rows without them are dropped); load/weather may be
     NaN and are left for the model to handle.
     """
     price = hourly_price(price_raw)
+    last_known = price.index.max()
+    if horizon and not price.empty:
+        future = pd.date_range(last_known + pd.Timedelta(hours=1), periods=horizon, freq="1h", name=price.index.name)
+        price = price.reindex(price.index.union(future))
     df = price.to_frame()
     df["target"] = df["price_eur_mwh"]
 
@@ -122,20 +137,47 @@ def build_features(
     df["dow"] = local.day_of_week
     df["month"] = local.month
     df["is_weekend"] = (local.day_of_week >= 5).astype(int)
+    day = local.tz_localize(None).normalize()  # naive local date: +1 day stays midnight across DST
 
     for h in PRICE_LAGS:
         df[f"lag_{h}h"] = df["price_eur_mwh"].shift(h)
 
+    daily = df["price_eur_mwh"].groupby(day).agg(["mean", "min", "max", "std", "last"])
+    daily["week_mean"] = daily["mean"].rolling(7).mean()
+    d1 = _prev_day(daily, day, 1)
+    for c in ("mean", "min", "max", "std", "last"):
+        df[f"d1_{c}"] = d1[c].to_numpy()
+    df["w1_mean"] = d1["week_mean"].to_numpy()
+
     if entsoe_raw is not None and not entsoe_raw.empty:
-        load = hourly_load(entsoe_raw)
+        load = hourly_load(entsoe_raw).reindex(df.index)
         for h in LOAD_LAGS:
-            df[f"load_lag_{h}h"] = load.shift(h).reindex(df.index)
+            df[f"load_lag_{h}h"] = load.shift(h)
+        df["d2_load_mean"] = _prev_day(load.groupby(day).mean().to_frame("m"), day, 2)["m"].to_numpy()
+        _add_fundamentals(df, entsoe_raw, day)
 
     if weather_raw is not None and not weather_raw.empty:
         _add_weather(df, weather_raw)
 
     df["zone"] = zone
-    return df.dropna(subset=[f"lag_{h}h" for h in PRICE_LAGS])
+    df = df.dropna(subset=[f"lag_{h}h" for h in PRICE_LAGS])
+    return df[df["target"].notna() | (df.index > last_known)]
+
+
+def _prev_day(daily: pd.DataFrame, day: pd.DatetimeIndex, k: int) -> pd.DataFrame:
+    """Per-local-day stats for day D-k, one row per hour of `day` (positional)."""
+    return daily.set_axis(daily.index + pd.Timedelta(days=k)).reindex(day)
+
+
+def _add_fundamentals(df: pd.DataFrame, entsoe_raw: pd.DataFrame, day: pd.DatetimeIndex) -> None:
+    fc = entsoe_raw[entsoe_raw["metric"] == LOAD_FORECAST]
+    if fc.empty:
+        return
+    load_fc = fc.set_index("time_start").sort_index()["value"].resample("1h").mean().reindex(df.index)
+    df["load_fc"] = load_fc
+    df["load_fc_day_mean"] = load_fc.groupby(day).transform("mean").to_numpy()
+    # Change vs the same hour's forecast a day earlier (both published pre-gate).
+    df["load_fc_vs_d1"] = load_fc - load_fc.shift(24)
 
 
 def _add_weather(df: pd.DataFrame, weather_raw: pd.DataFrame) -> None:

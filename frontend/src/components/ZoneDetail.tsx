@@ -37,19 +37,19 @@ const TIP = {
   labelStyle: { color: "#8a8d96" },
   itemStyle: { color: "#d4d6db" },
 };
-const WEEK = 7 * 24 * 3600_000;
+const DAY = 24 * 3600_000;
 
 const dayHour = (iso: string) =>
   `${new Date(iso).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} ${hhmm(iso)}`;
 const dayOnly = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 // Actual price over the window, the logged model forecast where one exists, and the
-// seasonal-naive baseline (actual price one week earlier) for every hour.
+// naive baseline (actual price one day earlier) for every hour.
 function series(prices: Prices | null, accuracy: Accuracy | null, money: Money) {
   const actual = new Map((prices?.points ?? []).map((p) => [Date.parse(p.time), p.price_eur_mwh]));
   const forecast = new Map((accuracy?.points ?? []).map((p) => [Date.parse(p.time), p.forecast]));
   return [...actual.keys()].map((t) => {
-    const base = actual.get(t - WEEK);
+    const base = actual.get(t - DAY);
     const f = forecast.get(t);
     return {
       time: new Date(t).toISOString(),
@@ -155,7 +155,7 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
                   />
                   <Line name="Actual" dataKey="actual" type="monotone" stroke="#eceef1" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                   {showBase && (
-                    <Line name="Baseline (last week)" dataKey="baseline" type="monotone" stroke="#8a8d96" strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
+                    <Line name="Baseline (yesterday)" dataKey="baseline" type="monotone" stroke="#8a8d96" strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
                   )}
                   <Line name="Model forecast" dataKey="forecast" type="monotone" stroke={color} strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
                 </LineChart>
@@ -168,7 +168,7 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
             <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-mute">
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-[#eceef1]" /> Actual</span>
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: color }} /> Model forecast (logged)</span>
-              {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour last week</span>}
+              {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
             </div>
           </div>
         </div>
@@ -184,7 +184,7 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
                 <Metric
                   label="Baseline MAE"
                   value={accuracy!.baseline_mae != null ? m(accuracy!.baseline_mae) : "—"}
-                  hint="same hour last week"
+                  hint="same hour yesterday"
                 />
               </div>
               {gain != null && (

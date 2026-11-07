@@ -45,6 +45,8 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
 # ---- loaders (read the raw parquet store) --------------------------------
 
 PRICE_METRIC = "day_ahead_price_eur_mwh"
+# ENTSO-E series the model reads: price (non-SE target), actual load, load forecast.
+MODEL_METRICS: tuple[str, ...] = (PRICE_METRIC, "load_mw", "load_forecast_mw")
 
 
 def load_prices(zone: str, since: pd.Timestamp | None = None) -> pd.DataFrame:
@@ -54,18 +56,22 @@ def load_prices(zone: str, since: pd.Timestamp | None = None) -> pd.DataFrame:
         if storage.enabled():
             return storage.read_zone("raw_price", zone, since=since)
         return _read("elpris", zone, ["time_start", "eur_per_kwh"])
-    return entsoe_prices(load_entsoe(zone, since=since, metric=PRICE_METRIC))
+    return entsoe_prices(load_entsoe(zone, since=since, metrics=(PRICE_METRIC,)))
 
 
 def entsoe_prices(entsoe_raw: pd.DataFrame) -> pd.DataFrame:
     """ENTSO-E day-ahead price rows (EUR/MWh) in the Elpris shape (time_start, eur_per_kwh)."""
+    if entsoe_raw.empty:  # zone not backfilled yet -> "no data", not a crash
+        return pd.DataFrame(columns=["time_start", "eur_per_kwh"])
     p = entsoe_raw[entsoe_raw["metric"] == PRICE_METRIC]
     return pd.DataFrame({"time_start": p["time_start"], "eur_per_kwh": p["value"] / 1000.0})
 
 
-def load_entsoe(zone: str, since: pd.Timestamp | None = None, metric: str | None = None) -> pd.DataFrame:
+def load_entsoe(
+    zone: str, since: pd.Timestamp | None = None, metrics: tuple[str, ...] | None = None
+) -> pd.DataFrame:
     if storage.enabled():
-        return storage.read_zone("raw_entsoe", zone, since=since, metric=metric)
+        return storage.read_zone("raw_entsoe", zone, since=since, metrics=metrics)
     return _read("entsoe", zone, ["time_start", "metric", "value"])
 
 
@@ -197,9 +203,13 @@ def load_features(zone: str, horizon: int = 0) -> pd.DataFrame:
     SMHI weather is not used: it has no history (only the live ~84h forecast), so
     Open-Meteo's archived NWP replaces it as the weather input.
     """
-    entsoe, nwp = load_entsoe(zone), load_nwp(zone)
+    # Only the ENTSO-E series the features use (wind/solar forecasts are stored but
+    # post-gate, never features), and outside Sweden the price comes from the same
+    # read instead of a second query.
+    entsoe, nwp = load_entsoe(zone, metrics=MODEL_METRICS), load_nwp(zone)
+    prices = load_prices(zone) if zone in config.ELPRIS_ZONES else entsoe_prices(entsoe)
     return build_features(
-        load_prices(zone),
+        prices,
         zone,
         entsoe_raw=entsoe if not entsoe.empty else None,
         nwp_raw=nwp if not nwp.empty else None,

@@ -121,7 +121,7 @@ export default function App() {
               title={theme === "dark" ? "Light mode" : "Dark mode"}
               className="caps border border-line px-2 py-1 text-fg transition-colors hover:bg-ink-600 hover:on-active"
             >
-              {theme === "dark" ? "Paper" : "Ink"}
+              {theme === "dark" ? "Light" : "Dark"}
             </button>
           </div>
         </header>

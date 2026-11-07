@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import logging
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from elvarsel import __version__, config, monitoring
+from elvarsel import __version__, config, fx, monitoring
+from elvarsel.features import build
 from elvarsel.models import forecast as fc
 
 log = logging.getLogger(__name__)
@@ -34,8 +36,16 @@ _CACHE: dict[str, tuple] = {}
 
 def _model(zone: str):
     if zone not in _CACHE:
-        _CACHE[zone] = fc.train_model(zone)
+        try:
+            _CACHE[zone] = fc.train_model(zone)
+        except ValueError as e:  # no price history yet (e.g. a zone not backfilled)
+            raise HTTPException(status_code=503, detail=str(e)) from e
     return _CACHE[zone]
+
+
+def _known(zone: str) -> None:
+    if zone not in config.ZONES:
+        raise HTTPException(status_code=404, detail=f"unknown zone {zone}")
 
 
 @app.get("/health")
@@ -44,9 +54,8 @@ def health() -> dict[str, str]:
 
 
 @app.get("/v1/forecast")
-def forecast(zone: str = Query(..., description="SE1..SE4")) -> dict:
-    if zone not in config.ZONES:
-        raise HTTPException(status_code=404, detail=f"unknown zone {zone}")
+def forecast(zone: str = Query(..., description="bidding zone, e.g. SE3, NO1, DK2, FI")) -> dict:
+    _known(zone)
     model, feats, version = _model(zone)
     df = fc.forecast_next_day(zone, model, feats)
     as_of = df["time"].iloc[0].isoformat()
@@ -70,12 +79,36 @@ def forecast(zone: str = Query(..., description="SE1..SE4")) -> dict:
 
 @app.get("/v1/accuracy")
 def accuracy(
-    zone: str = Query(..., description="SE1..SE4"),
+    zone: str = Query(..., description="bidding zone, e.g. SE3"),
     days: int = Query(7, ge=1, le=90, description="look-back window"),
 ) -> dict:
-    if zone not in config.ZONES:
-        raise HTTPException(status_code=404, detail=f"unknown zone {zone}")
+    _known(zone)
     return monitoring.accuracy(zone, days)
+
+
+@app.get("/v1/prices")
+def prices(
+    zone: str = Query(..., description="bidding zone, e.g. SE3"),
+    days: int = Query(30, ge=1, le=730, description="look-back window"),
+) -> dict:
+    """Realized hourly day-ahead prices (EUR/MWh) for the last `days` of history."""
+    _known(zone)
+    s = build.hourly_price(build.load_prices(zone)).dropna()
+    s = s[s.index > s.index.max() - pd.Timedelta(days=days)] if len(s) else s
+    return {
+        "zone": zone,
+        "unit": "EUR/MWh",
+        "points": [{"time": t.isoformat(), "price_eur_mwh": round(float(v), 2)} for t, v in s.items()],
+    }
+
+
+@app.get("/v1/zones")
+def zones() -> dict:
+    """Zone metadata (country, display currency, city, coordinates) + latest ECB FX for display."""
+    return {
+        "zones": [{"code": z, **i._asdict()} for z, i in config.ZONES.items()],
+        "fx": fx.latest({i.currency for i in config.ZONES.values()}),
+    }
 
 
 @app.get("/v1/status")

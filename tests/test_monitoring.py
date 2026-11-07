@@ -67,7 +67,20 @@ def test_score_empty_inputs():
     empty_log = pd.DataFrame(columns=["as_of", "target_time", "price_eur_mwh"])
     realized = pd.Series(dtype="float64")
     s = monitoring.score(empty_log, realized)
-    assert s == {"n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": []}
+    assert s == {
+        "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None,
+        "by_horizon": [], "points": [], "baseline_mae": None,
+    }
+
+
+def test_score_baseline_is_same_hour_last_week():
+    log = _log("2026-11-08T00:00:00Z", [50.0, 60.0])
+    idx = pd.DatetimeIndex(["2026-11-01T00:00:00Z", "2026-11-08T00:00:00Z", "2026-11-08T01:00:00Z"])
+    realized = pd.Series([40.0, 48.0, 58.0], index=idx)  # 2026-11-01T01 missing -> no baseline for hour 2
+    s = monitoring.score(log, realized)
+    assert [p["baseline"] for p in s["points"]] == [40.0, None]
+    assert s["baseline_mae"] == pytest.approx(8.0)  # |48 - 40|, only where a baseline exists
+    assert s["mae"] == pytest.approx(2.0)
 
 
 def test_log_forecast_noop_when_db_disabled(monkeypatch):

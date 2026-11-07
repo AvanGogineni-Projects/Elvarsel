@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  FALLBACK_ZONES,
   fetchAccuracy,
   fetchForecast,
+  fetchPrices,
+  fetchZones,
   mockForecast,
-  ZONES,
   type Accuracy,
   type Forecast,
+  type Fx,
+  type Prices,
   type Zone,
+  type ZoneInfo,
 } from "./api";
 
 export type Health = "live" | "mock" | "loading";
 
 export interface DashboardState {
-  forecasts: Record<Zone, Forecast | null>;
+  zones: ZoneInfo[];
+  fx: Fx | null;
+  forecasts: Record<Zone, Forecast | null>; // null = live backend has no data for the zone yet
   accuracy: Record<Zone, Accuracy | null>;
   health: Health;
   lastUpdated: number | null;
@@ -22,19 +29,26 @@ export interface DashboardState {
 
 const REFRESH_MS = 60_000; // monitoring cadence
 
+// Settles every promise in parallel into a zone-keyed record (failures -> fallback).
+async function perZone<T>(zones: Zone[], get: (z: Zone, i: number) => Promise<T>, fallback: (z: Zone, i: number) => T) {
+  const out: Record<Zone, T> = {};
+  await Promise.all(
+    zones.map(async (z, i) => {
+      try {
+        out[z] = await get(z, i);
+      } catch {
+        out[z] = fallback(z, i);
+      }
+    })
+  );
+  return out;
+}
+
 export function useDashboard(): DashboardState {
-  const [forecasts, setForecasts] = useState<Record<Zone, Forecast | null>>({
-    SE1: null,
-    SE2: null,
-    SE3: null,
-    SE4: null,
-  });
-  const [accuracy, setAccuracy] = useState<Record<Zone, Accuracy | null>>({
-    SE1: null,
-    SE2: null,
-    SE3: null,
-    SE4: null,
-  });
+  const [zones, setZones] = useState<ZoneInfo[]>([]);
+  const [fx, setFx] = useState<Fx | null>(null);
+  const [forecasts, setForecasts] = useState<Record<Zone, Forecast | null>>({});
+  const [accuracy, setAccuracy] = useState<Record<Zone, Accuracy | null>>({});
   const [health, setHealth] = useState<Health>("loading");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,46 +60,27 @@ export function useDashboard(): DashboardState {
     inflight.current = ac;
     setLoading(true);
 
-    // Each zone resolves independently: a single live fetch flips health to
-    // "live"; zones that fail fall back to mock so the grid always fills.
-    let anyLive = false;
-    const results = await Promise.all(
-      ZONES.map(async (zone): Promise<[Zone, Forecast]> => {
-        try {
-          const f = await fetchForecast(zone, ac.signal);
-          anyLive = true;
-          return [zone, f];
-        } catch {
-          return [zone, mockForecast(zone)];
-        }
-      })
-    );
+    // No zone list from the API means the backend is down: demo mode on the fallback zones.
+    const meta = await fetchZones(ac.signal).catch(() => null);
     if (ac.signal.aborted) return;
+    const list = meta?.zones ?? FALLBACK_ZONES;
+    const codes = list.map((z) => z.code);
+    setZones(list);
+    setFx(meta?.fx ?? null);
 
-    const next = {} as Record<Zone, Forecast>;
-    for (const [zone, f] of results) next[zone] = f;
-
-    setForecasts(next);
-    setHealth(anyLive ? "live" : "mock");
+    // Demo data only when the whole backend is down; never mixed into live data.
+    const fc = meta
+      ? await perZone<Forecast | null>(codes, (z) => fetchForecast(z, ac.signal), () => null)
+      : Object.fromEntries(codes.map((z, i) => [z, mockForecast(z, i)]));
+    if (ac.signal.aborted) return;
+    setForecasts(fc);
+    setHealth(meta ? "live" : "mock");
     setLastUpdated(Date.now());
     setLoading(false);
 
-    // Accuracy is best-effort and only meaningful against a live backend;
-    // failures (or mock mode) leave the panel in its "awaiting actuals" state.
-    if (anyLive) {
-      const accResults = await Promise.all(
-        ZONES.map(async (zone): Promise<[Zone, Accuracy | null]> => {
-          try {
-            return [zone, await fetchAccuracy(zone, 7, ac.signal)];
-          } catch {
-            return [zone, null];
-          }
-        })
-      );
-      if (ac.signal.aborted) return;
-      const accNext = {} as Record<Zone, Accuracy | null>;
-      for (const [zone, a] of accResults) accNext[zone] = a;
-      setAccuracy(accNext);
+    if (meta) {
+      const acc = await perZone<Accuracy | null>(codes, (z) => fetchAccuracy(z, 7, ac.signal), () => null);
+      if (!ac.signal.aborted) setAccuracy(acc);
     }
   }, []);
 
@@ -98,5 +93,30 @@ export function useDashboard(): DashboardState {
     };
   }, [load]);
 
-  return { forecasts, accuracy, health, lastUpdated, loading, refresh: load };
+  return { zones, fx, forecasts, accuracy, health, lastUpdated, loading, refresh: load };
+}
+
+// Detail data for one zone over a look-back window: realized prices + logged forecast accuracy.
+export function useZoneHistory(zone: Zone, days: number, live: boolean) {
+  const [prices, setPrices] = useState<Prices | null>(null);
+  const [acc, setAcc] = useState<Accuracy | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!live) return;
+    const ac = new AbortController();
+    setLoading(true);
+    Promise.all([
+      fetchPrices(zone, days, ac.signal).catch(() => null),
+      fetchAccuracy(zone, Math.min(days, 90), ac.signal).catch(() => null),
+    ]).then(([p, a]) => {
+      if (ac.signal.aborted) return;
+      setPrices(p);
+      setAcc(a);
+      setLoading(false);
+    });
+    return () => ac.abort();
+  }, [zone, days, live]);
+
+  return { prices, acc, loading };
 }

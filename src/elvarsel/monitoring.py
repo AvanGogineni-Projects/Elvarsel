@@ -76,6 +76,7 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         "rmse": None,
         "bias": None,
         "by_horizon": [],
+        "points": [],
     }
     if log.empty or realized.empty:
         return empty
@@ -97,6 +98,12 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": len(g)}
         for h, g in sorted(df.groupby("h"), key=lambda kv: kv[0])
     ]
+    # Forecast vs actual per hour for charting; if an hour was forecast more than once, show the latest.
+    latest = df.sort_values("as_of").drop_duplicates("target_time", keep="last").sort_values("target_time")
+    points = [
+        {"time": t.isoformat(), "forecast": float(f), "actual": float(a)}
+        for t, f, a in zip(latest["target_time"], latest["price_eur_mwh"], latest["actual"], strict=True)
+    ]
     return {
         "n": len(df),
         "n_logged": n_logged,
@@ -104,6 +111,7 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         "rmse": metrics.rmse(y, p),
         "bias": float((p - y).mean()),  # +ve = model over-forecasts
         "by_horizon": by_horizon,
+        "points": points,
     }
 
 
@@ -111,7 +119,7 @@ def accuracy(zone: str, days: int = 7) -> dict:
     """Live accuracy for a zone over the last `days` of logged forecasts."""
     base = {"zone": zone, "window_days": days, "unit": "EUR/MWh"}
     if not storage.enabled():
-        return {**base, "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": []}
+        return {**base, "n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": []}
     ensure_table()
     log = _read_log(zone, days)
     realized = build.hourly_price(build.load_prices(zone))

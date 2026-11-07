@@ -82,7 +82,7 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 - `GET /health` → `{status, version}`
 - `GET /v1/forecast?zone=SE1..SE4` → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh}]}` (24 hourly points, next day). Logs the forecast to `forecast_log` (best-effort).
 - `GET /v1/status` → `{service, version, zones, models:{zone:version}}` (models populate lazily per served zone)
-- `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon over **matured** logged forecasts; `n=0` until forecasts age past their horizon and actuals land (~24h).
+- `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon + `points` (forecast vs actual per hour, latest forecast per hour) over **matured** logged forecasts; `n=0` until forecasts age past their horizon and actuals land (~24h).
 
 ## Modelling rules (don't violate)
 
@@ -125,6 +125,5 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 
 1. Ingest writes to the DB directly (currently parquet + manual sync).
 2. Model registry (MLflow) in place of lazy in-process training.
-3. Log forecasts from a scheduled job (not only on serve); chart the
-   `by_horizon` error the accuracy endpoint already returns.
+3. Log forecasts from a scheduled job (not only on serve).
 4. Scheduled retrain/ingest; deploy (Dockerfile targets Python 3.12).

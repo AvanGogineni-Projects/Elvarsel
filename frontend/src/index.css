@@ -14,8 +14,8 @@ body,
 
 body {
   margin: 0;
-  background: #05070f;
-  color: #e7ebf7;
+  background: #0b0c0e;
+  color: #eceef1;
   font-family: Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -24,14 +24,14 @@ body {
 /* Thin, quiet scrollbars to match the dark shell. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 210, 0.2) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 210, 0.18);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
 }
 

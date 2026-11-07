@@ -34,6 +34,19 @@ def test_score_matured_forecast():
     # error-by-horizon: 3 horizons (0h,1h,2h), one point each
     assert [h["h"] for h in s["by_horizon"]] == [0, 1, 2]
     assert all(h["n"] == 1 for h in s["by_horizon"])
+    # forecast-vs-actual pairs for charting, in time order
+    assert [(p["forecast"], p["actual"]) for p in s["points"]] == [(50.0, 48.0), (60.0, 58.0), (70.0, 68.0)]
+    assert s["points"][0]["time"].startswith("2026-11-01T00:00:00")
+
+
+def test_score_points_keep_latest_forecast_per_hour():
+    # the same hour forecast twice (two as_of runs) -> chart shows the later forecast only
+    first = _log("2026-11-01T00:00:00Z", [50.0])
+    second = _log("2026-11-01T00:00:00Z", [40.0]).assign(as_of=pd.Timestamp("2026-11-01T01:00:00Z"))
+    realized = pd.Series([45.0], index=pd.DatetimeIndex(["2026-11-01T00:00:00Z"]))
+    s = monitoring.score(pd.concat([first, second], ignore_index=True), realized)
+    assert s["n"] == 2  # both still count toward MAE
+    assert [(p["forecast"], p["actual"]) for p in s["points"]] == [(40.0, 45.0)]
 
 
 def test_score_only_counts_matured_points():
@@ -54,7 +67,7 @@ def test_score_empty_inputs():
     empty_log = pd.DataFrame(columns=["as_of", "target_time", "price_eur_mwh"])
     realized = pd.Series(dtype="float64")
     s = monitoring.score(empty_log, realized)
-    assert s == {"n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": []}
+    assert s == {"n": 0, "n_logged": 0, "mae": None, "rmse": None, "bias": None, "by_horizon": [], "points": []}
 
 
 def test_log_forecast_noop_when_db_disabled(monkeypatch):

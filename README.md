@@ -1,8 +1,9 @@
 # Elvarsel
 
-Swedish Electricity Forecasting Model. ML/MLOps Project.
+Nordic Electricity Forecasting Model. ML/MLOps Project.
 
-Short-horizon forecasting for Sweden's four bidding zones (SE1–SE4): next-day
+Short-horizon forecasting for the 12 Nordic bidding zones (SE1–4, NO1–5,
+DK1–2, FI): next-day
 hourly spot price and load, served through an API and dashboard, wrapped in a
 full MLOps lifecycle (ingestion, tracking, registry, monitoring, drift,
 automated retraining).
@@ -47,9 +48,14 @@ python -m elvarsel.ingest.run --source all
 # One source, specific zones
 python -m elvarsel.ingest.run --source elpris --zones SE3 SE4
 
-# Backfill a date range (Elpris / ENTSO-E serve history)
+# Re-ingest a date range into parquet
 python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-05
+
+# Backfill years of history straight into the database (hourly, resumable)
+python -m elvarsel.ingest.backfill --years 2
 ```
+
+Elpris covers Sweden only (native SEK); NO/DK/FI zones price from ENTSO-E.
 
 `--source`: `elpris`, `entsoe`, `smhi`, `both` (elpris+entsoe), `all`.
 SMHI is a current-forecast snapshot, so it ignores the date range and is

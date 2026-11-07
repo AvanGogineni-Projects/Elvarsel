@@ -1,4 +1,4 @@
-"""ENTSO-E Transparency Platform client (day-ahead price + load per zone).
+"""ENTSO-E Transparency Platform client (day-ahead price + load per bidding zone).
 
 Wraps entsoe-py's EntsoePandasClient. Needs ENTSOE_API_TOKEN; callers should
 skip gracefully when it is unset (see run.py).
@@ -10,9 +10,6 @@ import datetime as dt
 import pandas as pd
 
 from elvarsel import config
-
-# entsoe-py area codes for the Swedish bidding zones.
-_AREA = {"SE1": "SE_1", "SE2": "SE_2", "SE3": "SE_3", "SE4": "SE_4"}
 
 
 class MissingToken(RuntimeError):
@@ -32,11 +29,15 @@ def fetch(zone: str, day: dt.date) -> pd.DataFrame:
 
     Returns long-format rows: time_start (UTC), zone, metric, value.
     """
-    client = _client()
-    area = _AREA[zone]
     # ENTSO-E queries are half-open on local day boundaries; use CET.
     start = pd.Timestamp(day, tz="Europe/Stockholm")
-    end = start + pd.Timedelta(days=1)
+    return fetch_range(zone, start, start + pd.Timedelta(days=1))
+
+
+def fetch_range(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Like `fetch`, for any [start, end) window (used by the backfill)."""
+    client = _client()
+    area = config.ZONES[zone].entsoe_area
 
     price = client.query_day_ahead_prices(area, start=start, end=end)
     load = client.query_load(area, start=start, end=end)  # DataFrame with 'Actual Load'

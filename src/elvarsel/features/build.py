@@ -36,9 +36,18 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
 # ---- loaders (read the raw parquet store) --------------------------------
 
 def load_prices(zone: str) -> pd.DataFrame:
-    if storage.enabled():
-        return storage.read_zone("raw_price", zone)
-    return _read("elpris", zone, ["time_start", "eur_per_kwh"])
+    """Raw prices with time_start + eur_per_kwh: Elpris for Swedish zones, ENTSO-E elsewhere."""
+    if zone in config.ELPRIS_ZONES:
+        if storage.enabled():
+            return storage.read_zone("raw_price", zone)
+        return _read("elpris", zone, ["time_start", "eur_per_kwh"])
+    return entsoe_prices(load_entsoe(zone))
+
+
+def entsoe_prices(entsoe_raw: pd.DataFrame) -> pd.DataFrame:
+    """ENTSO-E day-ahead price rows (EUR/MWh) in the Elpris shape (time_start, eur_per_kwh)."""
+    p = entsoe_raw[entsoe_raw["metric"] == "day_ahead_price_eur_mwh"]
+    return pd.DataFrame({"time_start": p["time_start"], "eur_per_kwh": p["value"] / 1000.0})
 
 
 def load_entsoe(zone: str) -> pd.DataFrame:

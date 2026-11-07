@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     total = 0
     for source in sources:
         for zone in args.zones:
+            if source == "elpris" and zone not in config.ELPRIS_ZONES:
+                continue  # Elpris only covers Sweden; other zones price from ENTSO-E
             # SMHI is a current-forecast snapshot, not per-day; fetch once for today.
             days = [today] if source == "smhi" else list(_daterange(args.start, end))
             for day in days:

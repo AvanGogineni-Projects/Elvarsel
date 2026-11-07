@@ -16,7 +16,11 @@ import {
   type ZoneInfo,
 } from "./api";
 
-export type Health = "live" | "mock" | "loading";
+export type Health = "live" | "mock" | "offline" | "loading";
+
+// Invented demo prices are a development aid only. A deployed site must never show
+// made-up numbers as if they were forecasts, so production shows "offline" instead.
+const DEMO_WHEN_OFFLINE = import.meta.env.DEV;
 
 export interface DashboardState {
   zones: ZoneInfo[];
@@ -64,19 +68,29 @@ export function useDashboard(): DashboardState {
     inflight.current = ac;
     setLoading(true);
 
-    // No zone list from the API means the backend is down: demo mode on the fallback zones.
+    // No zone list from the API means the backend is down.
     const [meta, bt] = await Promise.all([
       fetchZones(ac.signal).catch(() => null),
       fetchBacktest(ac.signal).catch(() => null),
     ]);
     if (ac.signal.aborted) return;
     setBacktest(bt);
+    if (!meta && !DEMO_WHEN_OFFLINE) {
+      // Production: say so plainly and keep retrying on the refresh timer.
+      setZones([]);
+      setForecasts({});
+      setAccuracy({});
+      setHealth("offline");
+      setLastUpdated(null);
+      setLoading(false);
+      return;
+    }
     const list = meta?.zones ?? FALLBACK_ZONES;
     const codes = list.map((z) => z.code);
     setZones(list);
     setFx(meta?.fx ?? null);
 
-    // Demo data only when the whole backend is down; never mixed into live data.
+    // Demo data (dev only) when the whole backend is down; never mixed into live data.
     const fc = meta
       ? await perZone<Forecast | null>(codes, (z) => fetchForecast(z, ac.signal), () => null)
       : Object.fromEntries(codes.map((z, i) => [z, mockForecast(z, i)]));

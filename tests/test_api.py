@@ -66,3 +66,17 @@ def test_backtest_serves_report_json(monkeypatch, tmp_path):
 
     monkeypatch.setattr(main.config, "BACKTEST_JSON", tmp_path / "missing.json")
     assert TestClient(main.app).get("/v1/backtest").status_code == 404
+
+
+def test_engine_holds_no_pool_on_vercel(monkeypatch):
+    from sqlalchemy.pool import NullPool
+
+    from elvarsel import storage
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:6543/db")
+    monkeypatch.setenv("VERCEL", "1")
+    storage._engine.cache_clear()
+    try:
+        assert isinstance(storage._engine().pool, NullPool)
+    finally:
+        storage._engine.cache_clear()  # don't leak the fake engine into other tests

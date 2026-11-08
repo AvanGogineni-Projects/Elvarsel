@@ -1,4 +1,4 @@
-import { COUNTRY_NAME } from "../api";
+import { COUNTRY_NAME, SOURCE_LABEL, SOURCES, type Source } from "../api";
 import type { Unit } from "../lib";
 
 interface Props {
@@ -11,6 +11,8 @@ interface Props {
   unit: Unit;
   onUnit: (u: Unit) => void;
   fxDate: string | null;
+  source: Source | "ALL";
+  onSource: (s: Source | "ALL") => void;
 }
 
 function Segmented<T extends string>({
@@ -25,14 +27,15 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex border border-line">
+    // Never wider than the screen: on a phone a long row scrolls sideways inside itself.
+    <div role="radiogroup" aria-label={label} className="flex max-w-full overflow-x-auto border border-line">
       {options.map((o, i) => (
         <button
           key={o.value}
           role="radio"
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`caps px-2.5 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
+          className={`caps shrink-0 whitespace-nowrap px-2.5 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
             i ? "border-l border-line" : ""
           } ${o.value === value ? "bg-ink-600 on-active" : "text-mute hover:text-fg"}`}
         >
@@ -72,6 +75,12 @@ export default function Controls(p: Props) {
           ]}
         />
       </div>
+      <Segmented
+        label="Energy source"
+        value={p.source}
+        onChange={p.onSource}
+        options={[{ value: "ALL" as const, label: "All energy" }, ...SOURCES.map((s) => ({ value: s, label: SOURCE_LABEL[s] }))]}
+      />
       {p.fxDate && <span className="caps text-mute">ECB rate {p.fxDate}</span>}
     </div>
   );

@@ -32,6 +32,9 @@ def _ingest_zone(zone: str, today: dt.date) -> tuple[list[str], pd.DataFrame | N
         # Fundamentals through tomorrow (tomorrow's are the inputs for the next-day forecast).
         ("fundamentals", lambda: storage.upsert(
             entsoe_client.fetch_fundamentals_range(zone, start, start + pd.Timedelta(days=3)), "raw_entsoe")),
+        # Actual generation by source (for the dashboard's energy view; not a model input).
+        ("generation", lambda: storage.upsert(
+            entsoe_client.fetch_generation_range(zone, start, start + pd.Timedelta(days=2)), "raw_entsoe")),
     ]
     if zone in config.ELPRIS_ZONES:
         for day in (today - dt.timedelta(days=1), today):

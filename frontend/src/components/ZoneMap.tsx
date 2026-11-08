@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import type { Forecast, Zone, ZoneInfo } from "../api";
+import { SOURCE_LABEL, type Forecast, type Mix, type Source, type Zone, type ZoneInfo } from "../api";
 import { eur, stats, type Money } from "../lib";
 import { useTheme } from "../theme";
 import RAW from "../zones.geo.json";
@@ -108,9 +108,13 @@ interface Props {
   selected: Zone | undefined;
   money: Money;
   onSelect: (z: Zone) => void;
+  mix?: Mix | null;
+  source?: Source | "ALL";
 }
 
-export default function ZoneMap({ zones, forecasts, selected, money, onSelect }: Props) {
+const hexRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+export default function ZoneMap({ zones, forecasts, selected, money, onSelect, mix: energy, source = "ALL" }: Props) {
   const svg = useRef<SVGSVGElement>(null);
   const { p: pal } = useTheme();
   const shade = (t: number) => mix(pal.mapScale, t);
@@ -128,6 +132,19 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
   const vals = Object.values(avg) as number[];
   const [lo, hi] = vals.length ? [Math.min(...vals), Math.max(...vals)] : [0, 1];
   const t = (v: number) => (hi > lo ? (v - lo) / (hi - lo) : 0.5);
+
+  // Energy view: shade by the chosen source's share of each zone's generation, on a
+  // fixed 0-100% scale so zones compare directly (not min-max like prices).
+  const bySource = source !== "ALL";
+  const share = (z: Zone) => energy?.zones[z]?.share[source as Source];
+  const sourceScale = [hexRgb(pal.mapNoData), hexRgb(bySource ? pal.sources[source] : pal.fg)];
+  const fillOf = (z: Zone) => {
+    if (bySource) {
+      const s = share(z);
+      return s == null ? pal.mapNoData : mix(sourceScale, s / 100);
+    }
+    return avg[z] != null ? shade(t(avg[z]!)) : pal.mapNoData;
+  };
   const geo = useMemo(
     () => Object.entries(SHAPES).map(([z, rings]) => ({ z: z as Zone, d: pathOf(rings), at: labelPoint(rings) })),
     []
@@ -216,7 +233,11 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
         viewBox={`0 0 ${W} ${H}`}
         className="mx-auto w-full max-w-[400px] cursor-crosshair select-none"
         role="img"
-        aria-label="Map of Nordic bidding zones coloured by tomorrow's average price"
+        aria-label={
+          bySource
+            ? `Map of Nordic bidding zones coloured by ${SOURCE_LABEL[source as Source]} share of generation`
+            : "Map of Nordic bidding zones coloured by tomorrow's average price"
+        }
         onClick={onMapClick}
       >
         {geo.map(({ z, d }) => {
@@ -225,14 +246,22 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
             <path
               key={z}
               d={d}
-              fill={has ? shade(t(avg[z]!)) : pal.mapNoData}
+              fill={fillOf(z)}
               fillOpacity={hover === z || selected === z ? 1 : 0.82}
               stroke={selected === z ? pal.signal : pal.fg}
               strokeWidth={selected === z ? 2 : 0.6}
               onMouseEnter={() => setHover(z)}
               onMouseLeave={() => setHover(null)}
             >
-              <title>{has ? `${z}: ${eur(money.conv(avg[z]!), money.digits)} ${money.label} avg tomorrow` : `${z}: no data`}</title>
+              <title>
+                {bySource
+                  ? share(z) != null
+                    ? `${z}: ${share(z)}% ${SOURCE_LABEL[source as Source]}, last ${energy?.window_days} days`
+                    : `${z}: no generation data`
+                  : has
+                    ? `${z}: ${eur(money.conv(avg[z]!), money.digits)} ${money.label} avg tomorrow`
+                    : `${z}: no data`}
+              </title>
             </path>
           );
         })}
@@ -241,9 +270,9 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
             <text textAnchor="middle" className="fill-fg font-mono text-[10px] font-semibold uppercase" style={{ paintOrder: "stroke" }} stroke={pal.surface} strokeWidth={2.5}>
               {z}
             </text>
-            {avg[z] != null && (
+            {(bySource ? share(z) != null : avg[z] != null) && (
               <text y={11} textAnchor="middle" className="fill-fg/80 font-mono text-[8.5px]" style={{ paintOrder: "stroke" }} stroke={pal.surface} strokeWidth={2.5}>
-                {eur(money.conv(avg[z]!), 0)}
+                {bySource ? `${Math.round(share(z)!)}%` : eur(money.conv(avg[z]!), 0)}
               </text>
             )}
           </g>
@@ -257,10 +286,26 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect }:
       </svg>
 
       <div className="caps flex items-center gap-2 text-mute">
-        <span className="font-mono">{eur(money.conv(lo), 0)}</span>
-        <span className="h-2 flex-1 border border-line" style={{ background: `linear-gradient(90deg, ${shade(0)}, ${shade(1)})` }} />
-        <span className="font-mono">{eur(money.conv(hi), 0)}</span>
-        <span>{money.label} · avg tomorrow</span>
+        {bySource ? (
+          <>
+            <span className="font-mono">0%</span>
+            <span
+              className="h-2 flex-1 border border-line"
+              style={{ background: `linear-gradient(90deg, ${mix(sourceScale, 0)}, ${mix(sourceScale, 1)})` }}
+            />
+            <span className="font-mono">100%</span>
+            <span>
+              {SOURCE_LABEL[source as Source]} share · actual, last {energy?.window_days ?? 7} days
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="font-mono">{eur(money.conv(lo), 0)}</span>
+            <span className="h-2 flex-1 border border-line" style={{ background: `linear-gradient(90deg, ${shade(0)}, ${shade(1)})` }} />
+            <span className="font-mono">{eur(money.conv(hi), 0)}</span>
+            <span>{money.label} · avg tomorrow</span>
+          </>
+        )}
       </div>
 
       <div className="min-h-[64px] border-l-[3px] border-signal py-1 pl-3 text-sm" aria-live="polite">

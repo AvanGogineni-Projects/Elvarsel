@@ -4,6 +4,7 @@
     python -m elvarsel.ingest.backfill --zones NO1 DK1 --start 2025-01-01
     python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
     python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temp (all zones)
+    python -m elvarsel.ingest.backfill --years 0.25 --generation  # ~90 days of generation by source
 
 Stores hourly means (not native 15-min) to keep the history small; the feature
 builder resamples to hourly anyway. Only fills time *before* the earliest row
@@ -95,6 +96,21 @@ def backfill_elpris(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> int:
     return total
 
 
+def backfill_generation(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> int:
+    """Actual generation by source, month by month (idempotent upserts, so a rerun just refreshes)."""
+    total = 0
+    for a, b in months_newest_first(start, end):
+        try:
+            df = entsoe_client.fetch_generation_range(zone, a, b)
+        except Exception as e:  # noqa: BLE001 - one bad month must not stop the run
+            print(f"generation/{zone}/{a:%Y-%m}: FAILED {type(e).__name__}: {e}")
+            continue
+        n = storage.upsert(df, "raw_entsoe")
+        total += n
+        print(f"generation/{zone}/{a:%Y-%m}: {n} rows")
+    return total
+
+
 def backfill_nwp(zones: list[str], start: dt.date, end: dt.date) -> int:
     """Open-Meteo NWP for every zone in one request each (idempotent), then the NORDIC mean."""
     frames, total = [], 0
@@ -116,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--end", type=dt.date.fromisoformat, default=dt.date.today())
     p.add_argument("--fundamentals", action="store_true", help="backfill load/wind/solar forecasts only")
     p.add_argument("--nwp", action="store_true", help="backfill Open-Meteo wind/temperature only")
+    p.add_argument("--generation", action="store_true", help="backfill actual generation by source only")
     args = p.parse_args(argv)
 
     if not storage.enabled():
@@ -130,6 +147,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.nwp:
         total = backfill_nwp(args.zones, start.date(), (end + pd.Timedelta(days=2)).date())
+        print(f"done: {total} rows")
+        return 0
+    if args.generation:
+        total = sum(backfill_generation(z, start, end) for z in args.zones)
         print(f"done: {total} rows")
         return 0
     total = 0

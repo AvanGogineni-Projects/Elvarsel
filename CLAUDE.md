@@ -57,6 +57,7 @@ python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-0
 python -m elvarsel.ingest.backfill --years 2      # history -> DB, hourly, resumable
 python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
 python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temp
+python -m elvarsel.ingest.backfill --years 0.25 --generation  # ~90 days of generation by source
 python -m elvarsel.daily                          # what the GitHub Action runs (09:37 UTC, 10:23 backup)
 python -m elvarsel.models.report --no-track --n-splits 52   # walk-forward -> docs/backtest-results.md
 
@@ -83,7 +84,9 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
   engine per call — the session pooler caps at 15 clients and a per-call pool
   exhausts it (`EMAXCONNSESSION` 500s).
 - **Tables:** `raw_price`, `raw_entsoe` (metrics: price, `load_mw`,
-  `load/wind/solar_forecast_mw`), `raw_nwp` (Open-Meteo wind/temp per zone +
+  `load/wind/solar_forecast_mw`, and actual generation `gen_<source>_mw` for
+  `config.SOURCES` = hydro, wind, solar, nuclear, fossil, bio_other: realized,
+  for the dashboard's energy view only, never a model input), `raw_nwp` (Open-Meteo wind/temp per zone +
   zone `NORDIC` = system wind; created on first write), `raw_weather`,
   `forecast_log`. Writes
   go through `storage.upsert` (idempotent on each table's PK).
@@ -102,6 +105,7 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 - `GET /v1/forecast?zone=` (any of the 12) → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh, low, high}]}` (24 hourly points, next day; low/high = calibrated 80% range from 4%/96% quantile models). Served from the latest run the daily job logged to `forecast_log`; 503 before the first run.
 - `GET /v1/status` → `{service, version, zones, models:{zone:version}}` (models populate lazily per served zone)
 - `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon + `points` (forecast vs actual per hour, latest forecast per hour) over **matured** logged forecasts; `n=0` until forecasts age past their horizon and actuals land (~24h).
+- `GET /v1/mix?days=7` → each zone's actual generation share by source over the window (one query, all zones); `GET /v1/generation?zone=&days=7` → a zone's hourly MW by source (≤ 90 days stored).
 
 ## Modelling rules (don't violate)
 

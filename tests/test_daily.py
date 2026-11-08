@@ -36,6 +36,7 @@ def test_ingest_downloads_each_series_once_and_isolates_failures(monkeypatch):
         return empty
 
     monkeypatch.setattr(daily.entsoe_client, "fetch_fundamentals_range", fundamentals)
+    monkeypatch.setattr(daily.entsoe_client, "fetch_generation_range", lambda z, a, b: calls.append(("gen", z, (b - a).days)) or empty)
     monkeypatch.setattr(daily.elpris, "fetch", lambda z, d: calls.append(("elpris", z, d)) or empty)
     monkeypatch.setattr(daily.openmeteo, "fetch", lambda z, a, b: calls.append(("nwp", z, None)) or empty)
     monkeypatch.setattr(daily.openmeteo, "nordic_mean", lambda frames: empty)
@@ -43,7 +44,7 @@ def test_ingest_downloads_each_series_once_and_isolates_failures(monkeypatch):
 
     errors = daily.ingest(dt.date(2026, 11, 8))
     zones = list(daily.config.ZONES)
-    for kind, days in (("range", 2), ("fund", 3), ("nwp", None)):
+    for kind, days in (("range", 2), ("fund", 3), ("gen", 2), ("nwp", None)):
         got = sorted(z for k, z, d in calls if k == kind and d == days)
         assert got == sorted(zones), kind  # once per zone, with the right window
     assert sorted(z for k, z, _ in calls if k == "elpris") == sorted(daily.config.ELPRIS_ZONES * 2)

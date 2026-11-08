@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -11,7 +12,16 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { COUNTRY_NAME, type Accuracy, type Forecast, type Prices, type ZoneInfo } from "../api";
+import {
+  COUNTRY_NAME,
+  SOURCE_LABEL,
+  type Accuracy,
+  type Forecast,
+  type Generation,
+  type Prices,
+  type Source,
+  type ZoneInfo,
+} from "../api";
 import { eur, health, hhmm, type Money } from "../lib";
 import { useTheme } from "../theme";
 import { HEALTH_STYLE, type ZoneBacktest } from "./ZoneTile";
@@ -26,6 +36,8 @@ interface Props {
   onDays: (d: number) => void;
   money: Money;
   backtest?: ZoneBacktest;
+  generation?: Generation | null;
+  source?: Source | "ALL";
 }
 
 const RANGES = [
@@ -86,7 +98,19 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
   );
 }
 
-export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, days, onDays, money, backtest }: Props) {
+export default function ZoneDetail({
+  zone,
+  forecast,
+  prices,
+  accuracy,
+  loading,
+  days,
+  onDays,
+  money,
+  backtest,
+  generation,
+  source = "ALL",
+}: Props) {
   const [showBase, setShowBase] = useState(true);
   const { p } = useTheme();
   const AXIS = { fill: p.axis, fontSize: 11, fontFamily: "IBM Plex Mono, monospace" };
@@ -198,6 +222,56 @@ export default function ZoneDetail({ zone, forecast, prices, accuracy, loading, 
               {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
               <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Tomorrow · 80% range</span>
             </div>
+          </div>
+
+          {/* What the zone actually ran on: explains the price moves above (windy hours
+              cheap, low hydro dear). Realized ENTSO-E data, never a model input. */}
+          <div className="mt-8 border-t border-dashed border-line/40 pt-5">
+            <h3 className="text-lg font-bold tracking-tight text-fg">Generation by source</h3>
+            <p className="caps mt-0.5 text-mute">
+              MW · hourly · actual (ENTSO-E) · last {Math.min(days, 90)} days
+            </p>
+            {generation && generation.points.length ? (
+              <>
+                <div className={`mt-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <AreaChart data={generation.points} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                      <CartesianGrid stroke={p.grid} strokeDasharray="2 4" vertical={false} />
+                      <XAxis dataKey="time" tickFormatter={days > 7 ? dayOnly : dayHour} minTickGap={48} tick={AXIS} tickLine={false} axisLine={{ stroke: p.axisLine }} />
+                      <YAxis width={56} tick={AXIS} tickLine={false} axisLine={false} tickFormatter={(v) => eur(v, 0)} />
+                      <Tooltip
+                        {...TIP}
+                        labelFormatter={dayHour}
+                        formatter={(v: number, name: string) => [`${eur(v, 0)} MW`, SOURCE_LABEL[name as Source] ?? name]}
+                      />
+                      {generation.sources.map((s) => (
+                        <Area
+                          key={s}
+                          dataKey={s}
+                          stackId="mix"
+                          type="linear"
+                          stroke="none"
+                          fill={p.sources[s]}
+                          fillOpacity={source === "ALL" ? 0.8 : source === s ? 0.95 : 0.18}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="caps mt-3 flex flex-wrap gap-4 text-mute">
+                  {generation.sources.map((s) => (
+                    <span key={s} className={`flex items-center gap-1.5 ${source === s ? "text-fg" : ""}`}>
+                      <span className="h-2.5 w-4" style={{ background: p.sources[s] }} /> {SOURCE_LABEL[s]}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="caps mt-4 grid h-[120px] place-items-center border border-dashed border-line/50 text-mute">
+                {loading ? "Loading generation…" : "No generation data for this zone yet"}
+              </div>
+            )}
           </div>
         </div>
 

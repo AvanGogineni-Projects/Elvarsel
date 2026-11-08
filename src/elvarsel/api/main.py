@@ -16,7 +16,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from elvarsel import __version__, config, fx, monitoring
+from elvarsel import __version__, config, fx, generation, monitoring
 from elvarsel.features import build
 
 app = FastAPI(title="Elvarsel", version=__version__)
@@ -85,6 +85,22 @@ def prices(
         "unit": "EUR/MWh",
         "points": [{"time": t.isoformat(), "price_eur_mwh": round(float(v), 2)} for t, v in s.items()],
     }
+
+
+@app.get("/v1/mix")
+def mix(days: int = Query(7, ge=1, le=90, description="look-back window")) -> dict:
+    """Each zone's actual generation share by source over the last `days` (one query, all zones)."""
+    return generation.mix(days)
+
+
+@app.get("/v1/generation")
+def generation_series(
+    zone: str = Query(..., description="bidding zone, e.g. SE3"),
+    days: int = Query(7, ge=1, le=90, description="look-back window"),
+) -> dict:
+    """A zone's actual hourly generation by source (MW)."""
+    _known(zone)
+    return generation.series(zone, days)
 
 
 @app.get("/v1/zones")

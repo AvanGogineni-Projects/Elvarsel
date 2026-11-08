@@ -55,3 +55,25 @@ def test_zone_config_is_consistent():
     assert len(config.ZONES) == 12
     assert {z.currency for z in config.ZONES.values()} == {"SEK", "NOK", "DKK", "EUR"}
     assert set(config.ZONE_COORDS) == set(config.ZONES)
+
+
+def test_generation_groups_sources_and_ignores_pumping():
+    from elvarsel.ingest import entsoe_client as ec
+
+    idx = pd.date_range("2026-11-01T00:00Z", periods=8, freq="15min", tz="UTC")
+    cols = pd.MultiIndex.from_tuples([
+        ("Hydro Water Reservoir", "Actual Aggregated"),
+        ("Hydro Pumped Storage", "Actual Aggregated"),
+        ("Hydro Pumped Storage", "Actual Consumption"),  # pumping: must not count
+        ("Wind Onshore", "Actual Aggregated"),
+        ("Wind Offshore", "Actual Aggregated"),
+        ("Fossil Gas", "Actual Aggregated"),
+        ("Biomass", "Actual Aggregated"),
+    ])
+    gen = pd.DataFrame([[100.0, 10.0, 999.0, 30.0, 20.0, 5.0, 7.0]] * 8, index=idx, columns=cols)
+    out = ec.group_generation(gen)
+    assert len(out) == 2  # 15-min -> hourly
+    row = out.iloc[0]
+    assert row["hydro"] == 110.0 and row["wind"] == 50.0 and row["fossil"] == 5.0 and row["bio_other"] == 7.0
+    assert ec.source_of("Fossil Peat") == "fossil" and ec.source_of("Waste") == "bio_other"
+    assert ec.source_of("Nuclear") == "nuclear" and ec.source_of("Solar") == "solar"

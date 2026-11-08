@@ -58,6 +58,9 @@ WIND_SITES: dict[str, tuple[tuple[float, float], ...]] = {
     "DK2": ((54.8, 11.4), (55.0, 12.8)),  # Lolland / Kriegers Flak
 }
 
+# Generation source groups (actual ENTSO-E generation, grouped; see ingest.entsoe_client).
+SOURCES: tuple[str, ...] = ("hydro", "wind", "solar", "nuclear", "fossil", "bio_other")
+
 # Live forecasts come from this model family; older per-zone models are retired.
 MODEL_FAMILY = "lgbm-nordic"
 # Walk-forward backtest summary (written by models.report, served by /v1/backtest).

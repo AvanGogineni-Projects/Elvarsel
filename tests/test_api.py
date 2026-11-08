@@ -80,3 +80,13 @@ def test_engine_holds_no_pool_on_vercel(monkeypatch):
         assert isinstance(storage._engine().pool, NullPool)
     finally:
         storage._engine.cache_clear()  # don't leak the fake engine into other tests
+
+
+def test_mix_and_generation_endpoints(monkeypatch):
+    monkeypatch.setattr(main.generation, "mix", lambda days: {"window_days": days, "zones": {}})
+    monkeypatch.setattr(main.generation, "series", lambda zone, days: {"zone": zone, "points": []})
+    client = TestClient(main.app)
+    assert client.get("/v1/mix", params={"days": 7}).json()["window_days"] == 7
+    assert client.get("/v1/mix", params={"days": 400}).status_code == 422  # capped at 90 days
+    assert client.get("/v1/generation", params={"zone": "SE1"}).json()["zone"] == "SE1"
+    assert client.get("/v1/generation", params={"zone": "XX"}).status_code == 404

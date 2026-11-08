@@ -16,6 +16,11 @@ BASE = "https://www.elprisetjustnu.se/api/v1/prices"
 HEADERS = {"User-Agent": "elvarsel/0.0.1 (+https://github.com/AvanGogineni-Projects/Elvarsel)"}
 
 
+def new_client() -> httpx.Client:
+    """Elpris client that retries a failed connect (transient DNS/TCP/TLS errors)."""
+    return httpx.Client(headers=HEADERS, timeout=20, transport=httpx.HTTPTransport(retries=3))
+
+
 def fetch(zone: str, day: dt.date, *, client: httpx.Client | None = None) -> pd.DataFrame:
     """Fetch one day of spot prices for one zone.
 
@@ -24,7 +29,7 @@ def fetch(zone: str, day: dt.date, *, client: httpx.Client | None = None) -> pd.
     """
     url = f"{BASE}/{day:%Y}/{day:%m-%d}_{zone}.json"
     owned = client is None
-    client = client or httpx.Client(headers=HEADERS, timeout=20)
+    client = client or new_client()
     try:
         resp = client.get(url, headers=HEADERS)
         resp.raise_for_status()

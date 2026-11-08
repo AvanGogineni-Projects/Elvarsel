@@ -247,7 +247,7 @@ judge holidays or reservoirs.
 | 3 | … + Germany's D-1 price | 16.74 | rejected: slightly worse |
 | 4 | … + hydro reservoir levels | 16.60 | rejected: −0.1%, within noise; not worth a new feed |
 | 7 | Spike risk | — | **shipped** as a calibrated 80% range (4%/96% quantile models) |
-| 2 | Daily job | — | **shipped**: ingest → retrain → forecast → log, 09:15 UTC |
+| 2 | Daily job | — | **shipped**: ingest → retrain → forecast → log, 09:37 UTC (+10:23 backup) |
 
 ### 1. Wind, done point-in-time
 
@@ -343,7 +343,7 @@ original model never beat naive-24 at all.
 
 ### Operations (lever 2)
 
-`python -m elvarsel.daily` runs every day at 09:15 UTC
+`python -m elvarsel.daily` runs every day at 09:37 UTC (backup 10:23 UTC if the first did not succeed)
 (`.github/workflows/daily.yml`), before the 12:00 CET gate:
 1. ingest yesterday and today (prices, load, tomorrow's load forecast) and
    NWP from D-2 to D+2 into the database;

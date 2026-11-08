@@ -57,7 +57,7 @@ python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-0
 python -m elvarsel.ingest.backfill --years 2      # history -> DB, hourly, resumable
 python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
 python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temp
-python -m elvarsel.daily                          # what the 09:15 UTC GitHub Action runs
+python -m elvarsel.daily                          # what the GitHub Action runs (09:37 UTC, 10:23 backup)
 python -m elvarsel.models.report --no-track --n-splits 52   # walk-forward -> docs/backtest-results.md
 
 # Lint + test  (CI runs these on Python 3.12 for every PR)

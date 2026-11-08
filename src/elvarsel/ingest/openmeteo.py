@@ -19,6 +19,10 @@ import pandas as pd
 from elvarsel import config
 
 URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
+# Retry a failed connect (DNS, TCP, TLS handshake) a few times: GitHub's runners
+# saw transient handshake timeouts to Open-Meteo. Requests that got an answer
+# are never retried, so a real HTTP error still surfaces.
+CONNECT_RETRIES = 3
 WIND, TEMP = "nwp_wind_100m_kmh", "nwp_temp_2m_c"
 NORDIC = "NORDIC"
 
@@ -36,9 +40,15 @@ def fetch(zone: str, start: dt.date, end: dt.date, *, client: httpx.Client | Non
         "end_date": end.isoformat(),
         "timezone": "GMT",
     }
-    r = (client or httpx).get(URL, params=params, timeout=120)
-    r.raise_for_status()
-    body = r.json()
+    owned = client is None
+    client = client or httpx.Client(timeout=120, transport=httpx.HTTPTransport(retries=CONNECT_RETRIES))
+    try:
+        r = client.get(URL, params=params)
+        r.raise_for_status()
+        body = r.json()
+    finally:
+        if owned:
+            client.close()
     t = pd.to_datetime(body[0]["hourly"]["time"], utc=True)
 
     def col(i: int, var: str) -> pd.Series:

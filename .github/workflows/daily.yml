@@ -1,21 +1,51 @@
 name: Daily forecast
 
-# Ingest -> retrain -> forecast -> log for every zone, before the ~12:00 CET
-# day-ahead gate (09:15 UTC = 10:15 CET / 11:15 CEST, after the TSOs' day-ahead
-# load forecasts are due). This is the only place the model trains: it logs each
-# zone's forecast and 80% range to Postgres, and the read-only API on Vercel
-# serves them. Vercel itself deploys from Git; nothing is uploaded from here.
+# Ingest -> retrain -> forecast -> log for every zone. This is the only place the
+# model trains: it logs each zone's forecast and 80% range to Postgres, and the
+# read-only API on Vercel serves them. Vercel itself deploys from Git.
+#
+# Two scheduled starts, because GitHub delays or drops scheduled runs under load
+# (the first 09:15 slot never fired). Both avoid the busy :00/:15 marks:
+#   09:37 UTC  primary: after the TSOs' day-ahead load forecasts are due
+#              (09:00 UTC in winter), before the 12:00 CET auction gate.
+#   10:23 UTC  backup: runs only if no run has succeeded yet today (UTC), so it
+#              also retries a day whose first run failed.
+# Running late is safe for the data: ingest never reads tomorrow's prices.
 on:
   schedule:
-    - cron: "15 9 * * *"
+    - cron: "37 9 * * *"
+    - cron: "23 10 * * *"
   workflow_dispatch:
 
 concurrency:
   group: daily-forecast
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read # the guard lists this workflow's runs
+
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      done: ${{ steps.check.outputs.done }}
+    steps:
+      - name: Has a run already succeeded today?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Manual runs always proceed; a scheduled run skips if today is already done.
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "done=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow daily.yml --status success \
+                --created ">=$(date -u +%F)" --json databaseId --jq length)
+          echo "successful runs today: $n"
+          echo "done=$([ "$n" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   daily:
+    needs: guard
+    if: needs.guard.outputs.done != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

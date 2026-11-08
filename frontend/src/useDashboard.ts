@@ -5,6 +5,8 @@ import {
   fetchBacktest,
   fetchGeneration,
   fetchMix,
+  fetchScoreboard,
+  type Scoreboard,
   type Generation,
   type Mix,
   type Backtest,
@@ -33,6 +35,7 @@ export interface DashboardState {
   accuracy: Record<Zone, Accuracy | null>;
   backtest: Backtest | null;
   mix: Mix | null;
+  scoreboard: Scoreboard | null;
   health: Health;
   lastUpdated: number | null;
   loading: boolean;
@@ -63,6 +66,7 @@ export function useDashboard(): DashboardState {
   const [accuracy, setAccuracy] = useState<Record<Zone, Accuracy | null>>({});
   const [backtest, setBacktest] = useState<Backtest | null>(null);
   const [mix, setMix] = useState<Mix | null>(null);
+  const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null);
   const [health, setHealth] = useState<Health>("loading");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,14 +79,16 @@ export function useDashboard(): DashboardState {
     setLoading(true);
 
     // No zone list from the API means the backend is down.
-    const [meta, bt, mx] = await Promise.all([
+    const [meta, bt, mx, sb] = await Promise.all([
       fetchZones(ac.signal).catch(() => null),
       fetchBacktest(ac.signal).catch(() => null),
       fetchMix(undefined, ac.signal).catch(() => null),
+      fetchScoreboard(ac.signal).catch(() => null),
     ]);
     if (ac.signal.aborted) return;
     setBacktest(bt);
     setMix(mx);
+    setScoreboard(sb);
     if (!meta && !DEMO_WHEN_OFFLINE) {
       // Production: say so plainly and keep retrying on the refresh timer.
       setZones([]);
@@ -123,7 +129,7 @@ export function useDashboard(): DashboardState {
     };
   }, [load]);
 
-  return { zones, fx, forecasts, accuracy, backtest, mix, health, lastUpdated, loading, refresh: load };
+  return { zones, fx, forecasts, accuracy, backtest, mix, scoreboard, health, lastUpdated, loading, refresh: load };
 }
 
 // Detail data for one zone over a look-back window: realized prices + logged forecast accuracy.

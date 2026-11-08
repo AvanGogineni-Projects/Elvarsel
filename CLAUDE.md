@@ -105,6 +105,7 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 - `GET /v1/forecast?zone=` (any of the 12) → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh, low, high}]}` (24 hourly points, next day; low/high = calibrated 80% range from 4%/96% quantile models). Served from the latest run the daily job logged to `forecast_log`; 503 before the first run.
 - `GET /v1/status` → `{service, version, zones, models:{zone:version}}` (models populate lazily per served zone)
 - `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon + `points` (forecast vs actual per hour, latest forecast per hour) over **matured** logged forecasts; `n=0` until forecasts age past their horizon and actuals land (~24h).
+- `GET /v1/scoreboard?days=30` → live track record per zone and pooled, for windows 7 and `days`: days the model beat naive-24, MAE vs naive on the same hours, 80% range coverage (latest forecast per hour; one `forecast_log` read + each zone's price window).
 - `GET /v1/mix?days=7` → each zone's actual generation share by source over the window (one query, all zones); `GET /v1/generation?zone=&days=7` → a zone's hourly MW by source (≤ 90 days stored).
 
 ## Modelling rules (don't violate)

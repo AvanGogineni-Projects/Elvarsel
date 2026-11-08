@@ -28,6 +28,24 @@ def test_fetch_averages_wind_sites_and_takes_temperature_at_the_load_centre():
     assert str(df.time_start.dt.tz) == "UTC"
 
 
+
+@respx.mock
+def test_fetch_retries_a_timeout_after_a_pause_but_gives_up_eventually(monkeypatch):
+    pauses = []
+    monkeypatch.setattr(openmeteo.time, "sleep", pauses.append)
+    ok = httpx.Response(200, json=[_site([1, 1, 1], [0, 0, 0])] * 3)
+    timeout = httpx.ConnectTimeout("handshake timed out")
+    respx.get(openmeteo.URL).mock(side_effect=[timeout, timeout, ok])
+    assert len(openmeteo.fetch("SE3", dt.date(2026, 5, 1), dt.date(2026, 5, 1))) == 6
+    assert pauses == list(openmeteo.BACKOFF_S)
+
+    respx.get(openmeteo.URL).mock(side_effect=timeout)
+    try:
+        openmeteo.fetch("SE3", dt.date(2026, 5, 1), dt.date(2026, 5, 1))
+        raise AssertionError("expected the timeout to surface")
+    except httpx.ConnectTimeout:
+        pass
+
 def test_nordic_mean_and_features_join_on_target_hour():
     idx = pd.date_range("2026-05-01T00:00:00Z", periods=12 * 24, freq="1h", tz="UTC")
     a = openmeteo._long(pd.Series(10.0, index=idx), "SE3", openmeteo.WIND)

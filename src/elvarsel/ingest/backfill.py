@@ -73,7 +73,7 @@ def backfill_entsoe(zone: str, start: pd.Timestamp, end: pd.Timestamp, *, fundam
 def backfill_elpris(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> int:
     stop = min(end, _earliest("raw_price", zone) or end)
     total = 0
-    with httpx.Client(headers=elpris.HEADERS, timeout=20) as client:
+    with elpris.new_client() as client:
         for a, b in months_newest_first(start, stop):
             days = pd.date_range(a.tz_convert("Europe/Stockholm").date(), b.tz_convert("Europe/Stockholm").date(),
                                  freq="D", inclusive="left")

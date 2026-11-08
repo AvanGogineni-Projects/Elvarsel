@@ -56,7 +56,7 @@ python -m elvarsel.ingest.backfill --years 2
 python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
 python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temperature
 
-# Daily: ingest -> retrain -> forecast -> log (GitHub Action at 09:15 UTC;
+# Daily: ingest -> retrain -> forecast -> log (GitHub Action at 09:37 UTC, backup 10:23;
 # needs repo secrets DATABASE_URL and ENTSOE_API_TOKEN)
 python -m elvarsel.daily
 ```
@@ -98,7 +98,7 @@ pushes to `main`.
 
 Training and serving are split:
 
-- **GitHub Action** (`.github/workflows/daily.yml`, 09:15 UTC, before the
+- **GitHub Action** (`.github/workflows/daily.yml`, 09:37 UTC + a 10:23 backup that skips if done, before the
   12:00 CET auction gate): ingest → retrain → forecast → log each zone's
   forecast and 80% range to Postgres. The only place the model trains.
 - **Vercel** (`vercel.json`, one project, two services, deployed from Git on

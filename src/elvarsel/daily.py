@@ -1,7 +1,7 @@
 """Daily job: ingest -> retrain -> forecast -> log, for every zone.
 
 Run it before the ~12:00 CET day-ahead gate (the GitHub Actions schedule runs it
-at 09:15 UTC). It is the only place the model trains: it writes straight to the
+at 09:37 UTC, with a 10:23 backup). It is the only place the model trains: it writes straight to the
 database, and the read-only API serves what it logged. A zone that fails is reported and the job
 exits non-zero, but one bad zone never stops the others.
 

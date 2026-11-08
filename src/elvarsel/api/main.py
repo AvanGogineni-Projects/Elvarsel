@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from elvarsel import __version__, config, fx, generation, monitoring
@@ -29,6 +29,21 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+# The data changes once a day (the daily job), but an open dashboard re-polls every
+# endpoint and each poll read Postgres: ~3 MB of Supabase egress per refresh. Vercel's
+# CDN caches responses that carry s-maxage, so each URL reads the database at most
+# once an hour however many tabs are open; a forecast shows up at most an hour late.
+CACHE_CONTROL = "public, max-age=60, s-maxage=3600"
+
+
+@app.middleware("http")
+async def _cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/v1/") and response.status_code == 200:  # never cache errors
+        response.headers["Cache-Control"] = CACHE_CONTROL
+    return response
 
 
 def _known(zone: str) -> None:

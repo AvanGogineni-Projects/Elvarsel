@@ -90,3 +90,11 @@ def test_mix_and_generation_endpoints(monkeypatch):
     assert client.get("/v1/mix", params={"days": 400}).status_code == 422  # capped at 90 days
     assert client.get("/v1/generation", params={"zone": "SE1"}).json()["zone"] == "SE1"
     assert client.get("/v1/generation", params={"zone": "XX"}).status_code == 404
+
+
+def test_v1_success_is_cdn_cacheable_but_errors_and_health_are_not(monkeypatch):
+    monkeypatch.setattr(main.fx, "latest", lambda cur: None)
+    client = TestClient(main.app)
+    assert "s-maxage" in client.get("/v1/zones").headers["cache-control"]
+    assert "cache-control" not in client.get("/v1/prices", params={"zone": "XX"}).headers  # 404
+    assert "cache-control" not in client.get("/health").headers

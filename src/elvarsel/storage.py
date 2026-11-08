@@ -10,8 +10,11 @@ drop-in for the parquet readers.
 from __future__ import annotations
 
 import os
+import threading
 import uuid
+from collections import defaultdict
 from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -111,7 +114,20 @@ def read_zone(
     table: str, zone: str, *, since: pd.Timestamp | None = None, metrics: tuple[str, ...] | None = None
 ) -> pd.DataFrame:
     """A zone's rows; `since` / `metrics` narrow the read in SQL (the API reads a
-    window, training reads only the metrics it uses, not every stored series)."""
+    window, training reads only the metrics it uses, not every stored series).
+
+    With HISTORY_CACHE_ENV set (the daily job), a full-history read is served from a
+    local parquet copy and only the recent rows come from the database: re-reading
+    ~2 years of history every run was most of the project's Supabase egress."""
+    cache = os.getenv(HISTORY_CACHE_ENV)
+    if cache and since is None and "time_start" in TABLES[table]:
+        return _read_zone_cached(Path(cache), table, zone, metrics)
+    return _query(table, zone, since=since, metrics=metrics)
+
+
+def _query(
+    table: str, zone: str, *, since: pd.Timestamp | None = None, metrics: tuple[str, ...] | None = None
+) -> pd.DataFrame:
     from sqlalchemy import text
 
     sql, params = f"select * from {table} where zone = :z", {"z": zone}
@@ -120,6 +136,41 @@ def read_zone(
     if metrics is not None:
         sql, params["ms"] = sql + " and metric = any(:ms)", list(metrics)
     return pd.read_sql(text(sql), _engine(), params=params)
+
+
+HISTORY_CACHE_ENV = "ELVARSEL_HISTORY_CACHE"
+# Every write the daily job makes lands within this window before the cached rows'
+# end (or now, if they reach into the future): ingest rewrites from 2 days back.
+# A manual backfill of older rows is not seen: the workflow re-reads everything monthly.
+REFRESH = pd.Timedelta(days=14)
+_cache_locks: defaultdict[Path, threading.Lock] = defaultdict(threading.Lock)
+
+
+def refresh_since(cached_end: pd.Timestamp, now: pd.Timestamp) -> pd.Timestamp:
+    """Start of the window re-read from the database on top of the cached rows."""
+    return min(cached_end, now) - REFRESH
+
+
+def merge_history(cached: pd.DataFrame, fresh: pd.DataFrame, since: pd.Timestamp) -> pd.DataFrame:
+    """Cached rows before `since` + every database row from `since` on (the database wins in the window)."""
+    return pd.concat([cached[cached["time_start"] < since], fresh], ignore_index=True)
+
+
+def _read_zone_cached(root: Path, table: str, zone: str, metrics: tuple[str, ...] | None) -> pd.DataFrame:
+    f = root / f"{table}-{zone}-{'+'.join(metrics) if metrics else 'all'}.parquet"
+    # Zones load concurrently and all of them read the shared NORDIC NWP rows: one reader per file.
+    with _cache_locks[f]:
+        cached = pd.read_parquet(f) if f.exists() else None
+        if cached is None or cached.empty:
+            df = _query(table, zone, metrics=metrics)
+        else:
+            since = refresh_since(cached["time_start"].max(), pd.Timestamp.now(tz="UTC"))
+            df = merge_history(cached, _query(table, zone, since=since, metrics=metrics), since)
+        root.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        df.to_parquet(tmp, index=False)
+        tmp.replace(f)  # atomic: a failed run never leaves a half-written cache
+    return df
 
 
 # source directory -> table

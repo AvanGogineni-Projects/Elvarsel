@@ -89,6 +89,8 @@ export default function ZoneTile({ zone, forecast, accuracy, backtest, mix, mixD
         </div>
       )}
 
+      <Curve forecast={forecast} />
+
       <div className="caps mt-auto flex items-center justify-between gap-2 pt-4">
         <span className={`truncate ${h.className}`}>{h.label}</span>
         {beats != null && (
@@ -99,5 +101,26 @@ export default function ZoneTile({ zone, forecast, accuracy, backtest, mix, mixD
         {forecast.mocked && <span className="text-mute">demo</span>}
       </div>
     </button>
+  );
+}
+
+// Tomorrow's hourly curve and 80% range. It only takes height a tile has spare
+// (contain:size stops it sizing the tile), so compact tiles don't show it.
+function Curve({ forecast }: { forecast: Forecast }) {
+  const pts = forecast.forecast;
+  if (pts.length < 2) return null;
+  const lo = Math.min(...pts.map((f) => f.low ?? f.price_eur_mwh));
+  const hi = Math.max(...pts.map((f) => f.high ?? f.price_eur_mwh));
+  const x = (i: number) => (i / (pts.length - 1)) * 100;
+  const y = (v: number) => 95 - ((v - lo) / (hi - lo || 1)) * 85;
+  const line = pts.map((f, i) => `${x(i)},${y(f.price_eur_mwh)}`).join(" ");
+  const band = pts.every((f) => f.low != null && f.high != null)
+    ? [...pts.map((f, i) => `${x(i)},${y(f.high!)}`), ...pts.map((f, i) => `${x(i)},${y(f.low!)}`).reverse()].join(" ")
+    : null;
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="min-h-0 w-full flex-1 [contain:size]" aria-hidden="true">
+      {band && <polygon points={band} className="fill-fg/10" />}
+      <polyline points={line} fill="none" className="stroke-fg" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }

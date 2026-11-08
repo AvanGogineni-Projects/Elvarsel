@@ -235,7 +235,12 @@ export default function App() {
           <Section n="02" title="Price areas · where is my price set?">
             <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
               <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} mix={mix} source={source} />
-              <div className="grid content-start grid-cols-2 border-l border-t border-line sm:grid-cols-3 2xl:grid-cols-4">
+              <div
+                className={`grid content-start grid-cols-2 border-l border-t border-line lg:content-stretch ${
+                  // Fewer tiles get fewer columns, and rows stretch to the map's height on wide screens.
+                  visible.length <= 2 ? "sm:grid-cols-2 lg:grid-cols-1" : visible.length <= 6 ? "sm:grid-cols-3 lg:grid-cols-2" : "sm:grid-cols-3 2xl:grid-cols-4"
+                }`}
+              >
                 {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
                   ready && z && !forecasts[z.code] ? (
                     <div key={z.code} className="flex flex-col border-b border-r border-line p-4">

@@ -42,3 +42,14 @@ def test_evaluate_runs_and_returns_scores():
     assert np.isfinite(m["model_mae"]) and np.isfinite(m["baseline_mae"])
     for s in res["splits"]:
         assert s["n_train"] > 0 and s["n_test"] > 0
+
+
+def test_evaluate_scores_both_baselines_and_range_coverage():
+    df = _feature_df(24)
+    res = train.evaluate(
+        df, "SE3", n_splits=2, test_days=2, track=False, params={"n_estimators": 20}, gap_hours=24,
+        quantiles=(0.1, 0.9),
+    )
+    m = res["mean"]
+    assert np.isfinite(m["week_mae"]) and 0.0 <= m["coverage"] <= 1.0
+    assert baseline.last_week(df).equals(df["lag_168h"])

@@ -20,12 +20,25 @@ def test_fetch_averages_wind_sites_and_takes_temperature_at_the_load_centre():
         _site([30, 40, 50], [0, 0, 0]),     # wind site 2
         _site([0, 0, 0], [5.0, 6.0, 7.0]),  # load centre (temperature only)
     ]))
-    df = openmeteo.fetch("SE3", dt.date(2026, 5, 1), dt.date(2026, 5, 1))
+    df = openmeteo.fetch("SE3", dt.date(2026, 5, 1), dt.date(2026, 5, 1), vintages=(2,))
     wind = df[df.metric == openmeteo.WIND].value.tolist()
     temp = df[df.metric == openmeteo.TEMP].value.tolist()
     assert wind == [20.0, 30.0, 50.0]  # mean of available sites per hour
     assert temp == [5.0, 6.0, 7.0]
     assert str(df.time_start.dt.tz) == "UTC"
+
+
+@respx.mock
+def test_fetch_stores_each_vintage_under_its_own_metric():
+    t = ["2026-05-01T00:00"]
+    hourly = {"time": t, **{f"{v}_previous_day{n}": [float(n)] for n in (2, 7) for v in ("wind_speed_100m", "temperature_2m")}}
+    respx.get(openmeteo.URL).mock(return_value=httpx.Response(200, json=[{"hourly": hourly}] * 3))
+    df = openmeteo.fetch("SE3", dt.date(2026, 5, 1), dt.date(2026, 5, 1), vintages=(2, 7))
+    assert dict(zip(df.metric, df.value)) == {
+        openmeteo.WIND: 2.0, openmeteo.TEMP: 2.0, "nwp_wind_100m_kmh_d7": 7.0, "nwp_temp_2m_c_d7": 7.0,
+    }
+    nordic = openmeteo.nordic_mean([df])
+    assert set(nordic.metric) == {openmeteo.WIND, "nwp_wind_100m_kmh_d7"}
 
 
 def test_nordic_mean_and_features_join_on_target_hour():

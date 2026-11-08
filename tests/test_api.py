@@ -30,7 +30,7 @@ def test_prices_returns_last_n_days_hourly(monkeypatch):
 
 
 def test_forecast_503_when_no_run_is_logged(monkeypatch):
-    monkeypatch.setattr(main.monitoring, "latest_forecast", lambda zone, family: None)
+    monkeypatch.setattr(main.monitoring, "latest_forecast", lambda zone, family, days: None)
     r = TestClient(main.app).get("/v1/forecast", params={"zone": "DK1"})
     assert r.status_code == 503
     assert "no forecast" in r.json()["detail"]

@@ -274,7 +274,7 @@ export default function App() {
             <Section n="03" title={`${selectedInfo.code} · ${selectedInfo.city} in detail`}>
               <ZoneDetail
                 zone={selectedInfo}
-                forecast={forecasts[selected]!}
+                forecast={history.outlook ?? forecasts[selected]!}
                 prices={history.prices}
                 accuracy={history.acc}
                 loading={history.loading}

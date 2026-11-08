@@ -18,7 +18,7 @@ def synthetic_sources(monkeypatch):
 
 
 def test_train_and_forecast_next_day(synthetic_sources):
-    version, frames = fc.train_and_forecast_all(horizon=24)
+    version, frames = fc.train_and_forecast_all(leads=(1,))
     assert version.startswith("lgbm-nordic-")
     assert set(frames) == set(build.config.ZONES)  # synthetic data for every zone
     df = frames["SE3"]
@@ -28,6 +28,15 @@ def test_train_and_forecast_next_day(synthetic_sources):
     assert df["price_eur_mwh"].notna().all()
     # forecast hours are strictly after the last known price hour
     assert df["time"].is_monotonic_increasing
+
+
+def test_train_and_forecast_outlook_covers_every_lead_in_order(synthetic_sources):
+    _, frames = fc.train_and_forecast_all(leads=(1, 2, 3))
+    df = frames["NO1"]
+    assert len(df) == 72
+    assert (df["time"].diff().dropna() == pd.Timedelta(hours=1)).all()  # contiguous hours, no gaps/overlap
+    assert df["time"].iloc[0] == pd.Timestamp("2026-05-21T00:00:00Z")  # right after the last known price
+    assert (df["low"] <= df["price_eur_mwh"]).all() and (df["price_eur_mwh"] <= df["high"]).all()
 
 
 def test_health_and_unknown_zone():
@@ -42,14 +51,19 @@ def test_forecast_endpoint_serves_the_latest_logged_run(monkeypatch):
     from elvarsel import monitoring
     from elvarsel.api import main
 
-    times = pd.date_range("2026-11-06T00:00:00Z", periods=24, freq="1h", tz="UTC")
+    times = pd.date_range("2026-11-05T23:00:00Z", periods=72, freq="1h", tz="UTC")  # 3 days from local midnight
     rows = pd.DataFrame({
         "as_of": times[0], "target_time": times, "model_version": "lgbm-nordic-test",
-        "price_eur_mwh": np.linspace(50, 70, 24), "low": np.linspace(45, 65, 24), "high": np.linspace(55, 75, 24),
+        "price_eur_mwh": np.linspace(50, 70, 72), "low": np.linspace(45, 65, 72), "high": np.linspace(55, 75, 72),
     })
-    monkeypatch.setattr(main.monitoring, "latest_forecast", lambda zone, family: monitoring.forecast_body(zone, rows))
+    monkeypatch.setattr(
+        main.monitoring, "latest_forecast", lambda zone, family, days: monitoring.forecast_body(zone, rows, days)
+    )
 
-    body = TestClient(main.app).get("/v1/forecast", params={"zone": "SE3"}).json()
+    client = TestClient(main.app)
+    assert len(client.get("/v1/forecast", params={"zone": "SE3", "days": 2}).json()["forecast"]) == 48
+    assert client.get("/v1/forecast", params={"zone": "SE3", "days": 8}).status_code == 422
+    body = client.get("/v1/forecast", params={"zone": "SE3"}).json()  # default: the next day only
     assert body["zone"] == "SE3" and body["unit"] == "EUR/MWh"
     assert body["model_version"] == "lgbm-nordic-test"
     assert body["as_of"] == times[0].isoformat()

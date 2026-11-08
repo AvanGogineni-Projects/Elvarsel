@@ -12,7 +12,8 @@ monitoring dashboard → accuracy/drift tracking. Prices are in **EUR/MWh**.
 Status: ingestion, point-in-time features, one LightGBM model for all 12
 zones (wind/temperature NWP, load forecast, holidays; calibrated 80% range) beating a
 naive "same hour yesterday" baseline, FastAPI serving, React dashboard, forecast
-logging + live accuracy, and a scheduled daily job. Roadmap at the bottom.
+logging + live accuracy, and a scheduled daily job. A 7-day outlook (D+2..D+7,
+one model per lead day) rides along with the next-day forecast. Roadmap at the bottom.
 
 ## Always work from the latest code
 
@@ -60,6 +61,7 @@ python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/
 python -m elvarsel.ingest.backfill --years 0.25 --generation  # ~90 days of generation by source
 python -m elvarsel.daily                          # what the GitHub Action runs (09:37 UTC, 10:23 backup)
 python -m elvarsel.models.report --no-track --n-splits 52   # walk-forward -> docs/backtest-results.md
+python -m elvarsel.models.report --outlook --n-splits 52    # error by lead day -> docs/outlook-results.md (~1h)
 
 # Lint + test  (CI runs these on Python 3.12 for every PR)
 ruff check src tests
@@ -102,9 +104,9 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
 ## API
 
 - `GET /health` → `{status, version}`
-- `GET /v1/forecast?zone=` (any of the 12) → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh, low, high}]}` (24 hourly points, next day; low/high = calibrated 80% range from 4%/96% quantile models). Served from the latest run the daily job logged to `forecast_log`; 503 before the first run.
+- `GET /v1/forecast?zone=&days=1` (any of the 12) → `{zone, model_version, as_of, unit, forecast:[{time, price_eur_mwh, low, high}]}` (default 24 hourly points, next day; `days=2..7` adds the outlook days; low/high = 80% range from 4%/96% quantile models, widening with lead). Served from the latest run the daily job logged to `forecast_log`; 503 before the first run.
 - `GET /v1/status` → `{service, version, zones, models:{zone:version}}` (models populate lazily per served zone)
-- `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon + `points` (forecast vs actual per hour, latest forecast per hour) over **matured** logged forecasts; `n=0` until forecasts age past their horizon and actuals land (~24h).
+- `GET /v1/accuracy?zone=&days=7` → MAE/RMSE/bias + error-by-horizon + `points` (forecast vs actual per hour, latest forecast per hour) over **matured** logged forecasts (headline = next-day points only; `by_horizon` spans the outlook); `n=0` until forecasts age past their horizon and actuals land (~24h).
 - `GET /v1/mix?days=7` → each zone's actual generation share by source over the window (one query, all zones); `GET /v1/generation?zone=&days=7` → a zone's hourly MW by source (≤ 90 days stored).
 
 ## Modelling rules (don't violate)
@@ -118,12 +120,19 @@ cd frontend && npm install && npm run dev      # :5173, see frontend/README.md
   Weather: Open-Meteo "previous_day2" NWP (issued ≥48h ahead, so before the
   gate for every hour of D). SMHI is ingested but unused (no history). The
   contemporaneous price is the target, never a feature.
+- **Outlook leads** (`build_features(..., lead=k)`, k = days after the last known
+  price day, 1..7): price/load lags and daily stats shift back 24h per extra day
+  (`lag_168h` stays absolute); the load forecast is lead 1 only; NWP needs vintage
+  `previous_day ≥ k+1`. Only days 2, 4, 7 are stored (`openmeteo.VINTAGE_DAYS`;
+  each is ~65 MB and the DB is on the 500 MB free tier), so D+7 has no NWP.
+  Backtest a lead with `gap_hours=24*(k-1)`; baselines are naive (same hour of
+  the last known day) and same hour last week. Results: `docs/outlook-results.md`.
 - **One model for all zones** (`build.stack`, `zone_code` categorical): it beat
   12 per-zone models in every zone. Tested and rejected (52-week backtest):
   cross-zone prices, Germany's price, reservoir levels, relative targets,
   recency weights. Re-test before re-adding them.
 - **One feature path.** Serving builds its rows with
-  `build_features(..., horizon=24)`, the same code as training; never
+  `build_features(..., horizon=24*k, lead=k)`, the same code as training; never
   re-implement features in `forecast.py` (`test_serving_rows_match_training_rows`).
 - **Benchmark is naive-24** (same hour yesterday); it beats same-hour-last-week
   by 13–41%. Evaluate with walk-forward weekly origins: 13 minimum, 52 for

@@ -126,11 +126,13 @@ export function useDashboard(): DashboardState {
   return { zones, fx, forecasts, accuracy, backtest, mix, health, lastUpdated, loading, refresh: load };
 }
 
-// Detail data for one zone over a look-back window: realized prices + logged forecast accuracy.
+// Detail data for one zone over a look-back window: realized prices + logged forecast accuracy,
+// plus the 7-day forecast outlook.
 export function useZoneHistory(zone: Zone, days: number, live: boolean) {
   const [prices, setPrices] = useState<Prices | null>(null);
   const [acc, setAcc] = useState<Accuracy | null>(null);
   const [gen, setGen] = useState<Generation | null>(null);
+  const [outlook, setOutlook] = useState<Forecast | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -141,15 +143,17 @@ export function useZoneHistory(zone: Zone, days: number, live: boolean) {
       fetchPrices(zone, days, ac.signal).catch(() => null),
       fetchAccuracy(zone, Math.min(days, 90), ac.signal).catch(() => null),
       fetchGeneration(zone, days, ac.signal).catch(() => null), // stored for the last ~90 days
-    ]).then(([p, a, g]) => {
+      fetchForecast(zone, ac.signal, 7).catch(() => null),
+    ]).then(([p, a, g, o]) => {
       if (ac.signal.aborted) return;
       setPrices(p);
       setAcc(a);
       setGen(g);
+      setOutlook(o);
       setLoading(false);
     });
     return () => ac.abort();
   }, [zone, days, live]);
 
-  return { prices, acc, gen, loading };
+  return { prices, acc, gen, outlook, loading };
 }

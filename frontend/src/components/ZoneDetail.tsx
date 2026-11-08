@@ -53,8 +53,8 @@ const dayHour = (iso: string) =>
 const dayOnly = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 // Actual price over the window, the logged model forecast where one exists, and the
-// naive baseline (actual price one day earlier) for every hour, then tomorrow's
-// forecast with its 80% range after the last actual.
+// naive baseline (actual price one day earlier) for every hour, then the
+// forecast outlook (up to 7 days) with its 80% range, which widens with lead, after the last actual.
 type Row = {
   time: string;
   actual?: number;
@@ -86,6 +86,11 @@ function series(prices: Prices | null, accuracy: Accuracy | null, next: Forecast
       band: p.low != null && p.high != null ? ([money.conv(p.low), money.conv(p.high)] as [number, number]) : undefined,
     }));
   return [...past, ...ahead];
+}
+
+function outlookDays(f: Forecast) {
+  const d = Math.round(f.forecast.length / 24);
+  return d > 1 ? `${d} days` : "day";
 }
 
 function Metric({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: string }) {
@@ -209,13 +214,13 @@ export default function ZoneDetail({
                       name,
                     ]}
                   />
-                  <Area name="Tomorrow 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.14} isAnimationActive={false} />
+                  <Area name="Outlook 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.14} isAnimationActive={false} />
                   <Line name="Actual" dataKey="actual" type="linear" stroke={p.fg} strokeWidth={1.25} dot={false} isAnimationActive={false} />
                   {showBase && (
                     <Line name="Baseline (yesterday)" dataKey="baseline" type="linear" stroke={p.baseline} strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
                   )}
                   <Line name="Model forecast" dataKey="forecast" type="monotone" stroke={color} strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
-                  <Line name="Tomorrow" dataKey="next" type="linear" stroke={color} strokeWidth={2.25} strokeDasharray="5 3" dot={false} isAnimationActive={false} />
+                  <Line name="Forecast" dataKey="next" type="linear" stroke={color} strokeWidth={2.25} strokeDasharray="5 3" dot={false} isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             ) : (
@@ -227,7 +232,7 @@ export default function ZoneDetail({
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-fg" /> Actual</span>
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: color }} /> Model forecast (logged)</span>
               {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Tomorrow · 80% range</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Forecast, next {outlookDays(forecast)} · 80% range</span>
             </div>
           </div>
 

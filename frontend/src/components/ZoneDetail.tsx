@@ -120,6 +120,13 @@ export default function ZoneDetail({
     itemStyle: { color: p.soft },
   };
   const color = p.signal; // the model's own lines are the signal colour
+  // Energy filter: show just the selected source (not faded leftovers) so the change is obvious.
+  const genSources = generation
+    ? source === "ALL"
+      ? generation.sources
+      : generation.sources.filter((s) => s === source)
+    : [];
+  const genLabel = source === "ALL" ? "Generation by source" : `${SOURCE_LABEL[source]} generation`;
   const h = HEALTH_STYLE[health(accuracy)];
   const data = useMemo(() => series(prices, accuracy, forecast, money), [prices, accuracy, forecast, money]);
   const scored = accuracy?.mae != null;
@@ -227,11 +234,11 @@ export default function ZoneDetail({
           {/* What the zone actually ran on: explains the price moves above (windy hours
               cheap, low hydro dear). Realized ENTSO-E data, never a model input. */}
           <div className="mt-8 border-t border-dashed border-line/40 pt-5">
-            <h3 className="text-lg font-bold tracking-tight text-fg">Generation by source</h3>
+            <h3 className="text-lg font-bold tracking-tight text-fg">{genLabel}</h3>
             <p className="caps mt-0.5 text-mute">
               MW · hourly · actual (ENTSO-E) · last {Math.min(days, 90)} days
             </p>
-            {generation && generation.points.length ? (
+            {generation && generation.points.length && genSources.length ? (
               <>
                 <div className={`mt-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
                   <ResponsiveContainer width="100%" height={200}>
@@ -244,15 +251,16 @@ export default function ZoneDetail({
                         labelFormatter={dayHour}
                         formatter={(v: number, name: string) => [`${eur(v, 0)} MW`, SOURCE_LABEL[name as Source] ?? name]}
                       />
-                      {generation.sources.map((s) => (
+                      {genSources.map((s) => (
                         <Area
                           key={s}
                           dataKey={s}
                           stackId="mix"
                           type="linear"
-                          stroke="none"
+                          stroke={source === "ALL" ? "none" : p.sources[s]}
+                          strokeWidth={1.5}
                           fill={p.sources[s]}
-                          fillOpacity={source === "ALL" ? 0.8 : source === s ? 0.95 : 0.18}
+                          fillOpacity={source === "ALL" ? 0.8 : 0.45}
                           isAnimationActive={false}
                         />
                       ))}
@@ -260,7 +268,7 @@ export default function ZoneDetail({
                   </ResponsiveContainer>
                 </div>
                 <div className="caps mt-3 flex flex-wrap gap-4 text-mute">
-                  {generation.sources.map((s) => (
+                  {genSources.map((s) => (
                     <span key={s} className={`flex items-center gap-1.5 ${source === s ? "text-fg" : ""}`}>
                       <span className="h-2.5 w-4" style={{ background: p.sources[s] }} /> {SOURCE_LABEL[s]}
                     </span>
@@ -269,7 +277,11 @@ export default function ZoneDetail({
               </>
             ) : (
               <div className="caps mt-4 grid h-[120px] place-items-center border border-dashed border-line/50 text-mute">
-                {loading ? "Loading generation…" : "No generation data for this zone yet"}
+                {loading
+                  ? "Loading generation…"
+                  : generation?.points.length && source !== "ALL"
+                    ? `No ${SOURCE_LABEL[source].toLowerCase()} generation in ${zone.code} over this period`
+                    : "No generation data for this zone yet"}
               </div>
             )}
           </div>

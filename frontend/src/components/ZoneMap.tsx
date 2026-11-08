@@ -230,7 +230,7 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect, m
       <svg
         ref={svg}
         viewBox={`0 0 ${W} ${H}`}
-        className="mx-auto w-full max-w-[400px] cursor-crosshair select-none lg:min-h-[420px] lg:max-w-none lg:flex-1"
+        className="mx-auto w-full max-w-[400px] cursor-crosshair select-none lg:min-h-[420px] lg:max-w-none lg:flex-1 lg:[contain:size]"
         role="img"
         aria-label={
           bySource

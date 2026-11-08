@@ -42,7 +42,7 @@ export interface DashboardState {
   refresh: () => void;
 }
 
-const REFRESH_MS = 60_000; // monitoring cadence
+const REFRESH_MS = 10 * 60_000; // data changes once a day; each refresh is ~27 API calls
 
 // Settles every promise in parallel into a zone-keyed record (failures -> fallback).
 async function perZone<T>(zones: Zone[], get: (z: Zone, i: number) => Promise<T>, fallback: (z: Zone, i: number) => T) {

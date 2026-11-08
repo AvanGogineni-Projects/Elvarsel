@@ -287,14 +287,21 @@ def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
 _LOG_COLS = ["zone", "as_of", "target_time", "model_version", "price_eur_mwh", "low", "high"]
 
 
-def _read_log(zone: str | None, days: int) -> pd.DataFrame:
-    """Logged forecasts from the last `days`, for one zone or (None) every zone."""
+def _read_log(zone: str | None, days: int, next_day_only: bool = False) -> pd.DataFrame:
+    """Logged forecasts from the last `days`, for one zone or (None) every zone.
+    `next_day_only` drops the outlook days in SQL: a run's next day ends within 25 hours
+    of the run's first forecast hour (as `_day_offset` counts), which then picks it exactly."""
     from sqlalchemy import text
 
-    sql = text(
-        f"select {', '.join(_LOG_COLS)} from forecast_log "
-        "where as_of >= now() - make_interval(days => :d)" + (" and zone = :z" if zone else "")
-    )
+    cols = ", ".join(_LOG_COLS)
+    where = "where as_of >= now() - make_interval(days => :d)" + (" and zone = :z" if zone else "")
+    if next_day_only:
+        sql = text(
+            f"select {cols} from (select {cols}, min(target_time) over (partition by zone, as_of) as first_hour "
+            f"from forecast_log {where}) r where target_time < first_hour + interval '25 hours'"
+        )
+    else:
+        sql = text(f"select {cols} from forecast_log {where}")
     df = _read_or_empty(sql, {"z": zone, "d": days})
     return df if not df.empty else pd.DataFrame(columns=_LOG_COLS)
 
@@ -305,7 +312,7 @@ def live_scoreboard(model_family: str, days: int = 30) -> dict:
     now = pd.Timestamp.now(tz="UTC")
     if not storage.enabled():
         return {**base, **scoreboard({}, now, (7, days))}
-    log = _read_log(None, days)
+    log = _read_log(None, days, next_day_only=True)  # the scoreboard scores the next day only
     log = log[log["model_version"].str.startswith(f"{model_family}-")]
     since = now.floor("D") - pd.Timedelta(days=days + 2)
     matured = {

@@ -231,3 +231,4 @@ my-global-CLAUDE.md
 
 # macOS Finder metadata
 .DS_Store
+.history-cache/

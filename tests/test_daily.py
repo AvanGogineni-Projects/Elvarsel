@@ -38,7 +38,13 @@ def test_ingest_downloads_each_series_once_and_isolates_failures(monkeypatch):
     monkeypatch.setattr(daily.entsoe_client, "fetch_fundamentals_range", fundamentals)
     monkeypatch.setattr(daily.entsoe_client, "fetch_generation_range", lambda z, a, b: calls.append(("gen", z, (b - a).days)) or empty)
     monkeypatch.setattr(daily.elpris, "fetch", lambda z, d: calls.append(("elpris", z, d)) or empty)
-    monkeypatch.setattr(daily.openmeteo, "fetch", lambda z, a, b: calls.append(("nwp", z, None)) or empty)
+    def nwp(z, a, b):
+        calls.append(("nwp", z, None))
+        if z == "FI":
+            raise RuntimeError("handshake timed out")
+        return empty
+
+    monkeypatch.setattr(daily.openmeteo, "fetch", nwp)
     monkeypatch.setattr(daily.openmeteo, "nordic_mean", lambda frames: empty)
     monkeypatch.setattr(daily.storage, "upsert", lambda df, table: 0)
 
@@ -49,3 +55,4 @@ def test_ingest_downloads_each_series_once_and_isolates_failures(monkeypatch):
         assert got == sorted(zones), kind  # once per zone, with the right window
     assert sorted(z for k, z, _ in calls if k == "elpris") == sorted(daily.config.ELPRIS_ZONES * 2)
     assert errors == ["ingest NO1 fundamentals: RuntimeError: ENTSO-E timeout"]  # others unaffected
+    # A weather miss is only a warning: the next run's 5-day window refills it.

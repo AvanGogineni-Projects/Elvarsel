@@ -97,9 +97,22 @@ interface Place {
   id: number;
   name: string;
   admin1?: string;
+  admin2?: string; // municipality: tells two same-named places in one county apart
   country_code: string;
   latitude: number;
   longitude: number;
+  feature_code?: string; // GeoNames class: PPL* = populated place, MT/PK = mountain/peak
+  population?: number;
+}
+
+const NORDIC = ["SE", "NO", "DK", "FI"];
+
+/** Nordic matches, towns before terrain (a Kista district beats a Kista peak), biggest first. */
+export function rankPlaces(found: Place[]): Place[] {
+  const town = (p: Place) => (p.feature_code?.startsWith("PPL") ? 1 : 0);
+  return found
+    .filter((p) => NORDIC.includes(p.country_code))
+    .sort((a, b) => town(b) - town(a) || (b.population ?? 0) - (a.population ?? 0));
 }
 
 interface Props {
@@ -168,9 +181,10 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect, m
     if (!query.trim()) return;
     setSearching(true);
     try {
-      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query.trim())}&count=10&language=en&format=json`;
+      // count=50: the geocoder ranks worldwide, so Nordic towns can sit past the first 10.
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query.trim())}&count=50&language=en&format=json`;
       const body = await (await fetch(url)).json();
-      const nordic = ((body.results ?? []) as Place[]).filter((p) => ["SE", "NO", "DK", "FI"].includes(p.country_code));
+      const nordic = rankPlaces((body.results ?? []) as Place[]);
       setResults(nordic.slice(0, 5));
       if (nordic.length === 1) pick(nordic[0]);
     } catch {
@@ -198,7 +212,10 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect, m
         <input
           id="place"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setResults(null); // results belong to the last search, not to what's typed now
+          }}
           placeholder="Find a town: Uppsala, Bergen…"
           className="w-full border-0 border-b-2 border-line bg-transparent px-0 py-2 pr-20 font-mono text-sm text-fg placeholder:text-mute focus:border-signal focus:outline-none"
         />
@@ -216,7 +233,7 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect, m
                 <li key={p.id}>
                   <button type="button" onClick={() => pick(p)} className="w-full px-3 py-2 text-left text-soft hover:bg-ink-700">
                     {p.name}
-                    <span className="text-mute">{p.admin1 ? ` · ${p.admin1}` : ""} · {p.country_code}</span>
+                    <span className="text-mute">{[p.admin2, p.admin1].filter(Boolean).map((a) => ` · ${a}`).join("")} · {p.country_code}</span>
                   </button>
                 </li>
               ))

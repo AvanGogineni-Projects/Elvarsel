@@ -157,9 +157,8 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect, m
   };
 
   const onMapClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    const box = svg.current!.getBoundingClientRect();
-    const x = ((e.clientX - box.left) / box.width) * W;
-    const y = ((e.clientY - box.top) / box.height) * H;
+    // Screen -> viewBox coords; also correct when the map is letterboxed in a taller box.
+    const { x, y } = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.current!.getScreenCTM()!.inverse());
     const [lon, lat] = unproject(x, y);
     drop(`${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`, [lon, lat]);
   };
@@ -231,7 +230,7 @@ export default function ZoneMap({ zones, forecasts, selected, money, onSelect, m
       <svg
         ref={svg}
         viewBox={`0 0 ${W} ${H}`}
-        className="mx-auto w-full max-w-[400px] cursor-crosshair select-none"
+        className="mx-auto w-full max-w-[400px] cursor-crosshair select-none lg:min-h-[420px] lg:max-w-none lg:flex-1"
         role="img"
         aria-label={
           bySource

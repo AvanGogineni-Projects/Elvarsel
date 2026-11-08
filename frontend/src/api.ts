@@ -96,6 +96,32 @@ export interface Backtest {
 }
 export const fetchBacktest = (signal?: AbortSignal) => getJSON<Backtest>("/v1/backtest", signal);
 
+// Actual generation by source (ENTSO-E, realized and published with a delay).
+export const SOURCES = ["hydro", "wind", "solar", "nuclear", "fossil", "bio_other"] as const;
+export type Source = (typeof SOURCES)[number];
+export const SOURCE_LABEL: Record<Source, string> = {
+  hydro: "Hydro",
+  wind: "Wind",
+  solar: "Solar",
+  nuclear: "Nuclear",
+  fossil: "Fossil",
+  bio_other: "Bio & other",
+};
+export interface Mix {
+  window_days: number;
+  zones: Partial<Record<Zone, { total_mw: number; share: Record<Source, number> }>>;
+}
+export interface Generation {
+  zone: Zone;
+  unit: string;
+  sources: Source[];
+  points: ({ time: string } & Partial<Record<Source, number>>)[];
+}
+export const MIX_DAYS = 7;
+export const fetchMix = (days = MIX_DAYS, signal?: AbortSignal) => getJSON<Mix>(`/v1/mix?days=${days}`, signal);
+export const fetchGeneration = (zone: Zone, days = 7, signal?: AbortSignal) =>
+  getJSON<Generation>(`/v1/generation?zone=${zone}&days=${Math.min(days, 90)}`, signal);
+
 export const fetchZones = (signal?: AbortSignal) =>
   getJSON<{ zones: ZoneInfo[]; fx: Fx | null }>(`/v1/zones`, signal);
 

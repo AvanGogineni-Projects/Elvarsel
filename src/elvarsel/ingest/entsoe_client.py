@@ -90,6 +90,54 @@ def fetch_fundamentals_range(zone: str, start: pd.Timestamp, end: pd.Timestamp) 
     return _trim(pd.concat(frames, ignore_index=True), end.tz_convert("UTC"))
 
 
+# Actual generation by source, grouped for the dashboard's energy filter.
+SOURCES = config.SOURCES
+_GROUP = {
+    "Hydro Water Reservoir": "hydro",
+    "Hydro Run-of-river and pondage": "hydro",
+    "Hydro Pumped Storage": "hydro",
+    "Wind Onshore": "wind",
+    "Wind Offshore": "wind",
+    "Solar": "solar",
+    "Nuclear": "nuclear",
+}
+
+
+def source_of(psr: str) -> str:
+    """ENTSO-E production type -> dashboard source group (everything not listed,
+    e.g. Biomass, Waste, Other, Energy storage, lands in "bio_other")."""
+    return _GROUP.get(psr) or ("fossil" if psr.startswith("Fossil") else "bio_other")
+
+
+def group_generation(gen: pd.DataFrame) -> pd.DataFrame:
+    """Pure: entsoe-py generation frame -> hourly MW per source group (columns = SOURCES present).
+
+    Uses "Actual Aggregated" where ENTSO-E also reports "Actual Consumption"
+    (pumped storage pumping), so consumption never counts as generation.
+    """
+    if isinstance(gen.columns, pd.MultiIndex):
+        keep = [c for c in gen.columns if c[1] == "Actual Aggregated"]
+        gen = gen[keep].droplevel(1, axis=1)
+    grouped = gen.T.groupby(gen.columns.map(source_of)).sum(min_count=1).T
+    return grouped.resample("1h").mean()
+
+
+def fetch_generation_range(zone: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Actual hourly generation by source group (MW), as metrics `gen_<source>_mw`.
+
+    Recent days are often not published yet: no data is "no rows", not an error.
+    """
+    from entsoe.exceptions import NoMatchingDataError
+
+    try:
+        gen = _client().query_generation(config.ZONES[zone].entsoe_area, start=start, end=end)
+    except NoMatchingDataError:
+        return pd.DataFrame(columns=["time_start", "zone", "metric", "value"])
+    grouped = group_generation(gen)
+    frames = [_long(grouped[s].dropna(), zone, f"gen_{s}_mw") for s in grouped.columns]
+    return _trim(pd.concat(frames, ignore_index=True), end.tz_convert("UTC"))
+
+
 def _trim(df: pd.DataFrame, end_utc: pd.Timestamp) -> pd.DataFrame:
     """Drop the inclusive end-boundary row entsoe-py returns, keep one row per
     (metric, time) so a day has no duplicated midnight point."""

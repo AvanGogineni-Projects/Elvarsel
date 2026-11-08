@@ -56,6 +56,13 @@ export const STRIPES: Record<Flag, [string, number][]> = {
   ALL: [DK_STRIPE, FI_STRIPE, NO_STRIPE, SE_STRIPE].flatMap((s) => norm(s).map(([c, w]) => [c, w / 4] as [string, number])),
 };
 
+// Generation sources: conventional energy colours (hydro blue, wind teal, solar
+// amber, nuclear violet, fossil grey, bio green), muted for paper, lifted for ink.
+const SOURCE_COLORS: Record<Theme, Record<string, string>> = {
+  light: { hydro: "#2f6db0", wind: "#24877b", solar: "#c98a00", nuclear: "#7b4fb3", fossil: "#6e655c", bio_other: "#5a8a32" },
+  dark: { hydro: "#6fa3e0", wind: "#5cc6b8", solar: "#f2c14e", nuclear: "#b190de", fossil: "#aaa094", bio_other: "#94c26a" },
+};
+
 // ---- derivation --------------------------------------------------------------
 const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 const mix = (a: string, b: string, t: number) =>
@@ -96,6 +103,7 @@ function derive(b: Base, theme: Theme) {
     ink: alpha(b.fg, 0.45), // unselected series
     mapNoData: mix(b.bg, b.fg, 0.1),
     mapScale: [rgb(mix(b.bg, b.fg, 0.1)), rgb(b.signal)] as [number[], number[]], // cheap -> expensive
+    sources: SOURCE_COLORS[theme],
   };
   return { vars, palette };
 }

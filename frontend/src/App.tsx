@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
-import { COUNTRY_NAME, type Zone } from "./api";
+import { COUNTRY_NAME, type Source, type Zone } from "./api";
 import Controls from "./components/Controls";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
@@ -41,7 +41,8 @@ const FlagStripe = ({ flag }: { flag: Flag }) => (
 );
 
 export default function App() {
-  const { zones, fx, forecasts, accuracy, backtest, health, lastUpdated, loading, refresh } = useDashboard();
+  const { zones, fx, forecasts, accuracy, backtest, mix, health, lastUpdated, loading, refresh } = useDashboard();
+  const [source, setSource] = useState<Source | "ALL">("ALL");
   const { theme, toggle: toggleTheme, flag, setFlag } = useTheme();
   const bt = (z: Zone) => {
     const r = backtest?.zones[z];
@@ -176,6 +177,8 @@ export default function App() {
               unit={unit}
               onUnit={setUnit}
               fxDate={money.currency !== "EUR" ? fx?.date ?? null : null}
+              source={source}
+              onSource={setSource}
             />
           </div>
 
@@ -199,7 +202,7 @@ export default function App() {
 
           <Section n="02" title="Price areas · where is my price set?">
             <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-              <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} />
+              <ZoneMap zones={zones} forecasts={forecasts} selected={selected} money={money} onSelect={selectFromMap} mix={mix} source={source} />
               <div className="grid content-start grid-cols-2 border-l border-t border-line sm:grid-cols-3 2xl:grid-cols-4">
                 {(ready ? visible : visible.length ? visible : [null, null, null, null]).map((z, i) =>
                   ready && z && !forecasts[z.code] ? (
@@ -215,6 +218,9 @@ export default function App() {
                       forecast={forecasts[z.code]!}
                       accuracy={accuracy[z.code] ?? null}
                       backtest={bt(z.code)}
+                      mix={mix?.zones[z.code]?.share}
+                      mixDays={mix?.window_days}
+                      source={source}
                       money={money}
                       selected={z.code === selected}
                       onSelect={() => setSelected(z.code)}
@@ -239,6 +245,8 @@ export default function App() {
                 onDays={setDays}
                 money={money}
                 backtest={bt(selected)}
+                generation={history.gen}
+                source={source}
               />
             </Section>
           )}

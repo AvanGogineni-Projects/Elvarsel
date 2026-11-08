@@ -55,6 +55,7 @@ python -m elvarsel.ingest.run --source elpris --start 2026-10-01 --end 2026-11-0
 python -m elvarsel.ingest.backfill --years 2
 python -m elvarsel.ingest.backfill --years 2 --fundamentals   # load/wind/solar forecasts
 python -m elvarsel.ingest.backfill --years 2 --nwp            # Open-Meteo wind/temperature
+python -m elvarsel.ingest.backfill --years 0.25 --generation  # ~90 days of actual generation by source
 
 # Daily: ingest -> retrain -> forecast -> log (GitHub Action at 09:37 UTC, backup 10:23;
 # needs repo secrets DATABASE_URL and ENTSOE_API_TOKEN)

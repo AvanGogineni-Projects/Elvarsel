@@ -1,5 +1,6 @@
-import type { Accuracy, Forecast, ZoneInfo } from "../api";
+import { SOURCE_LABEL, SOURCES, type Accuracy, type Forecast, type Source, type ZoneInfo } from "../api";
 import { eur, health, stats, type Money } from "../lib";
+import { useTheme } from "../theme";
 import AnimatedNumber from "./AnimatedNumber";
 
 export interface ZoneBacktest {
@@ -14,6 +15,9 @@ interface Props {
   forecast: Forecast;
   accuracy: Accuracy | null;
   backtest?: ZoneBacktest;
+  mix?: Record<Source, number>;
+  mixDays?: number;
+  source?: Source | "ALL";
   money: Money;
   selected: boolean;
   onSelect: () => void;
@@ -25,7 +29,8 @@ export const HEALTH_STYLE = {
   waiting: { label: "Awaiting actuals", className: "text-mute" },
 } as const;
 
-export default function ZoneTile({ zone, forecast, accuracy, backtest, money, selected, onSelect }: Props) {
+export default function ZoneTile({ zone, forecast, accuracy, backtest, mix, mixDays, source = "ALL", money, selected, onSelect }: Props) {
+  const { p } = useTheme();
   const s = stats(forecast);
   const h = HEALTH_STYLE[health(accuracy)];
   const beats =
@@ -51,6 +56,29 @@ export default function ZoneTile({ zone, forecast, accuracy, backtest, money, se
       <div className="mt-3 border-t border-dashed border-line/40 pt-2 font-mono text-xs tabular text-soft">
         {eur(money.conv(s.min), money.digits)} – {eur(money.conv(s.max), money.digits)}
       </div>
+      {mix && (
+        <div className="mt-3" title={SOURCES.filter((s) => mix[s] > 0).map((s) => `${SOURCE_LABEL[s]} ${mix[s]}%`).join(" · ")}>
+          {/* Generation mix: one segment per source; the filtered source stays solid. */}
+          <div className="flex h-1.5 w-full overflow-hidden bg-fg/10" aria-hidden="true">
+            {SOURCES.filter((s) => mix[s] > 0).map((s) => (
+              <span
+                key={s}
+                style={{ width: `${mix[s]}%`, background: p.sources[s], opacity: source === "ALL" || source === s ? 1 : 0.22 }}
+                className="transition-opacity duration-300"
+              />
+            ))}
+          </div>
+          <div className="caps mt-1 text-mute">
+            {source === "ALL" ? (
+              <>mix · {mixDays ?? 7}d</>
+            ) : (
+              <>
+                <span className="text-fg">{mix[source].toFixed(0)}%</span> {SOURCE_LABEL[source]} · {mixDays ?? 7}d
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {backtest && (
         <div
           className={`caps mt-1 ${backtest.improvement_pct > 0 ? "text-fg" : "text-signal"}`}

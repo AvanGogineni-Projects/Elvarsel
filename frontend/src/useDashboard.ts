@@ -3,6 +3,10 @@ import {
   FALLBACK_ZONES,
   fetchAccuracy,
   fetchBacktest,
+  fetchGeneration,
+  fetchMix,
+  type Generation,
+  type Mix,
   type Backtest,
   fetchForecast,
   fetchPrices,
@@ -28,6 +32,7 @@ export interface DashboardState {
   forecasts: Record<Zone, Forecast | null>; // null = live backend has no data for the zone yet
   accuracy: Record<Zone, Accuracy | null>;
   backtest: Backtest | null;
+  mix: Mix | null;
   health: Health;
   lastUpdated: number | null;
   loading: boolean;
@@ -57,6 +62,7 @@ export function useDashboard(): DashboardState {
   const [forecasts, setForecasts] = useState<Record<Zone, Forecast | null>>({});
   const [accuracy, setAccuracy] = useState<Record<Zone, Accuracy | null>>({});
   const [backtest, setBacktest] = useState<Backtest | null>(null);
+  const [mix, setMix] = useState<Mix | null>(null);
   const [health, setHealth] = useState<Health>("loading");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,12 +75,14 @@ export function useDashboard(): DashboardState {
     setLoading(true);
 
     // No zone list from the API means the backend is down.
-    const [meta, bt] = await Promise.all([
+    const [meta, bt, mx] = await Promise.all([
       fetchZones(ac.signal).catch(() => null),
       fetchBacktest(ac.signal).catch(() => null),
+      fetchMix(undefined, ac.signal).catch(() => null),
     ]);
     if (ac.signal.aborted) return;
     setBacktest(bt);
+    setMix(mx);
     if (!meta && !DEMO_WHEN_OFFLINE) {
       // Production: say so plainly and keep retrying on the refresh timer.
       setZones([]);
@@ -115,13 +123,14 @@ export function useDashboard(): DashboardState {
     };
   }, [load]);
 
-  return { zones, fx, forecasts, accuracy, backtest, health, lastUpdated, loading, refresh: load };
+  return { zones, fx, forecasts, accuracy, backtest, mix, health, lastUpdated, loading, refresh: load };
 }
 
 // Detail data for one zone over a look-back window: realized prices + logged forecast accuracy.
 export function useZoneHistory(zone: Zone, days: number, live: boolean) {
   const [prices, setPrices] = useState<Prices | null>(null);
   const [acc, setAcc] = useState<Accuracy | null>(null);
+  const [gen, setGen] = useState<Generation | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -131,14 +140,16 @@ export function useZoneHistory(zone: Zone, days: number, live: boolean) {
     Promise.all([
       fetchPrices(zone, days, ac.signal).catch(() => null),
       fetchAccuracy(zone, Math.min(days, 90), ac.signal).catch(() => null),
-    ]).then(([p, a]) => {
+      fetchGeneration(zone, days, ac.signal).catch(() => null), // stored for the last ~90 days
+    ]).then(([p, a, g]) => {
       if (ac.signal.aborted) return;
       setPrices(p);
       setAcc(a);
+      setGen(g);
       setLoading(false);
     });
     return () => ac.abort();
   }, [zone, days, live]);
 
-  return { prices, acc, loading };
+  return { prices, acc, gen, loading };
 }

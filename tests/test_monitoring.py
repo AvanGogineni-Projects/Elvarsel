@@ -142,3 +142,61 @@ def test_read_paths_treat_a_missing_table_as_nothing_logged(monkeypatch):
     assert monitoring.latest_forecast("SE3", "lgbm-nordic") is None
     assert monitoring.latest_versions("lgbm-nordic") == {}
     assert monitoring._read_log("SE3", 7).empty
+
+
+def _matured_rows(day, prices, actuals, baselines, low=None, high=None):
+    """Matured rows for one Stockholm delivery day starting 00:00 CET (23:00 UTC prev day)."""
+    t = pd.date_range(pd.Timestamp(day, tz="Europe/Stockholm"), periods=len(prices), freq="1h").tz_convert("UTC")
+    df = pd.DataFrame({
+        "as_of": t[0] - pd.Timedelta(hours=14), "target_time": t,
+        "price_eur_mwh": prices, "actual": actuals, "baseline": baselines,
+    })
+    if low is not None:
+        df["low"], df["high"] = low, high
+    return df
+
+
+def test_summarize_counts_days_beaten_and_range_coverage():
+    # Day 1: model miss 1 vs naive 11 -> beaten. Day 2: model miss 5 vs naive 2 -> not.
+    d1 = _matured_rows("2026-11-01", [50.0, 60.0], [51.0, 59.0], [40.0, 70.0], low=[45.0, 59.5], high=[55.0, 65.0])
+    d2 = _matured_rows("2026-11-02", [50.0, 50.0], [55.0, 45.0], [53.0, 47.0], low=[40.0, 40.0], high=[60.0, 60.0])
+    s = monitoring.summarize(pd.concat([d1, d2], ignore_index=True))
+    assert (s["days_scored"], s["days_beat"]) == (2, 1)
+    assert s["mae"] == pytest.approx(3.0) and s["baseline_mae"] == pytest.approx(6.5)
+    # 59.0 fell below its 59.5 low; the other 3 landed inside -> 75%
+    assert s["coverage"] == pytest.approx(0.75) and s["n_range"] == 4
+
+
+def test_summarize_skips_hours_without_baseline_or_range():
+    d = _matured_rows("2026-11-01", [50.0, 60.0], [52.0, 60.0], [None, 70.0], low=[None, 50.0], high=[None, 70.0])
+    s = monitoring.summarize(d)
+    assert s["n"] == 1 and s["mae"] == pytest.approx(0.0)  # MAE on the same hours naive has
+    assert s["n_range"] == 1 and s["coverage"] == pytest.approx(1.0)
+
+
+def test_summarize_empty():
+    s = monitoring.summarize(pd.DataFrame())
+    assert s["n"] == 0 and s["mae"] is None and s["coverage"] is None and s["days_scored"] == 0
+
+
+def test_scoreboard_windows_pool_zones_and_keep_latest_forecast():
+    now = pd.Timestamp("2026-11-30T12:00Z")
+    old = _matured_rows("2026-11-05", [50.0], [50.0], [60.0])  # inside 30d, outside 7d
+    new = _matured_rows("2026-11-29", [50.0], [60.0], [61.0])  # inside both; model loses
+    rerun = new.assign(as_of=new["as_of"] + pd.Timedelta(hours=1), price_eur_mwh=60.0)  # later run, exact
+    b = monitoring.scoreboard({"SE3": pd.concat([old, new, rerun]), "FI": new}, now)
+    se3 = b["zones"]["SE3"]
+    assert se3["7"]["n"] == 1 and se3["7"]["mae"] == pytest.approx(0.0)  # the rerun replaced the first forecast
+    assert (se3["30"]["days_scored"], se3["30"]["days_beat"]) == (2, 2)
+    assert b["zones"]["FI"]["7"]["days_beat"] == 0
+    # pooled 7d: SE3 miss 0 + FI miss 10 -> 5, vs naive 1 + 1 -> 1: one day, not beaten
+    assert b["overall"]["7"]["n"] == 2 and b["overall"]["7"]["mae"] == pytest.approx(5.0)
+    assert (b["overall"]["7"]["days_scored"], b["overall"]["7"]["days_beat"]) == (1, 0)
+
+
+def test_scoreboard_endpoint_graceful_without_db(monkeypatch):
+    from elvarsel.api import main
+
+    monkeypatch.setattr(main.monitoring.storage, "enabled", lambda: False)
+    body = TestClient(main.app).get("/v1/scoreboard").json()
+    assert body["zones"] == {} and body["overall"]["30"]["n"] == 0 and body["windows"] == [7, 30]

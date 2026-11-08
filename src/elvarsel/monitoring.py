@@ -90,28 +90,17 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         "points": [],
         "baseline_mae": None,
     }
-    if log.empty or realized.empty:
-        return empty
-
-    df = log.copy()
-    df["target_time"] = pd.to_datetime(df["target_time"], utc=True)
-    df["as_of"] = pd.to_datetime(df["as_of"], utc=True)
-    actual = realized.reindex(pd.DatetimeIndex(df["target_time"]))
-    df["actual"] = actual.to_numpy()
-    df = df.dropna(subset=["actual"])
+    df = _matured(log, realized)
     if df.empty:
         return empty
 
     y = df["actual"].to_numpy()
     p = df["price_eur_mwh"].to_numpy()
-    df["h"] = ((df["target_time"] - df["as_of"]) / pd.Timedelta(hours=1)).round().astype(int)
 
     by_horizon = [
         {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": len(g)}
         for h, g in sorted(df.groupby("h"), key=lambda kv: kv[0])
     ]
-    # Naive baseline (same hour the previous day), as in the backtest: the model must beat it.
-    df["baseline"] = realized.reindex(pd.DatetimeIndex(df["target_time"]) - pd.Timedelta(days=1)).to_numpy()
     has_base = df.dropna(subset=["baseline"])
     # Forecast vs actual per hour for charting; if an hour was forecast more than once, show the latest.
     latest = df.sort_values("as_of").drop_duplicates("target_time", keep="last").sort_values("target_time")
@@ -133,6 +122,65 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
         if len(has_base)
         else None,
     }
+
+
+def _matured(log: pd.DataFrame, realized: pd.Series) -> pd.DataFrame:
+    """Logged rows whose actual has landed, with actual, naive baseline and horizon h."""
+    if log.empty or realized.empty:
+        return log.iloc[0:0].assign(actual=[], baseline=[], h=[])
+    df = log.copy()
+    df["target_time"] = pd.to_datetime(df["target_time"], utc=True)
+    df["as_of"] = pd.to_datetime(df["as_of"], utc=True)
+    df["actual"] = realized.reindex(pd.DatetimeIndex(df["target_time"])).to_numpy()
+    df = df.dropna(subset=["actual"])
+    # Naive baseline (same hour the previous day), as in the backtest: the model must beat it.
+    df["baseline"] = realized.reindex(pd.DatetimeIndex(df["target_time"]) - pd.Timedelta(days=1)).to_numpy()
+    df["h"] = ((df["target_time"] - df["as_of"]) / pd.Timedelta(hours=1)).round().astype(int)
+    return df
+
+
+def summarize(df: pd.DataFrame) -> dict:
+    """Pure: scoreboard numbers for matured rows (one forecast per hour).
+
+    MAE and the naive-24 MAE are on the same hours (those with a baseline). A
+    delivery day (Stockholm calendar) is "beaten" when the model's MAE that day is
+    below naive's. Coverage = share of actuals inside the logged 80% range.
+    """
+    if df.empty:
+        return {"n": 0, "mae": None, "baseline_mae": None, "days_scored": 0, "days_beat": 0, "coverage": None, "n_range": 0}
+    base = df.dropna(subset=["baseline"])
+    err = (base["price_eur_mwh"] - base["actual"]).abs()
+    naive = (base["baseline"] - base["actual"]).abs()
+    day = pd.to_datetime(base["target_time"], utc=True).dt.tz_convert("Europe/Stockholm").dt.date
+    daily = pd.DataFrame({"m": err, "b": naive, "d": day}).groupby("d").mean()
+    rng = df.dropna(subset=["low", "high"]) if {"low", "high"} <= set(df) else df.iloc[0:0]
+    inside = rng["actual"].between(rng["low"], rng["high"]) if len(rng) else pd.Series(dtype=bool)
+    return {
+        "n": len(base),
+        "mae": float(err.mean()) if len(base) else None,
+        "baseline_mae": float(naive.mean()) if len(base) else None,
+        "days_scored": len(daily),
+        "days_beat": int((daily["m"] < daily["b"]).sum()),
+        "coverage": float(inside.mean()) if len(rng) else None,
+        "n_range": len(rng),
+    }
+
+
+def scoreboard(matured: dict[str, pd.DataFrame], now: pd.Timestamp, windows: tuple[int, ...] = (7, 30)) -> dict:
+    """Pure: {zone: matured rows} -> summaries per zone and pooled over all zones,
+    for each look-back window (by delivery hour). If an hour was forecast more than
+    once, the latest forecast counts, as on the chart."""
+    latest = {
+        z: df.sort_values("as_of").drop_duplicates("target_time", keep="last") for z, df in matured.items()
+    }
+
+    def win(df: pd.DataFrame) -> dict:
+        t = pd.to_datetime(df["target_time"], utc=True)
+        return {str(d): summarize(df[t >= now - pd.Timedelta(days=d)]) for d in windows}
+
+    frames = [df for df in latest.values() if not df.empty]
+    pooled = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["target_time"])
+    return {"overall": win(pooled), "zones": {z: win(df) for z, df in latest.items()}}
 
 
 def latest_forecast(zone: str, model_family: str) -> dict | None:
@@ -216,12 +264,31 @@ def accuracy(zone: str, days: int = 7, model_family: str | None = None) -> dict:
     return {**base, **score(log, realized)}
 
 
-def _read_log(zone: str, days: int) -> pd.DataFrame:
+_LOG_COLS = ["zone", "as_of", "target_time", "model_version", "price_eur_mwh", "low", "high"]
+
+
+def _read_log(zone: str | None, days: int) -> pd.DataFrame:
+    """Logged forecasts from the last `days`, for one zone or (None) every zone."""
     from sqlalchemy import text
 
     sql = text(
-        "select as_of, target_time, model_version, price_eur_mwh from forecast_log "
-        "where zone = :z and as_of >= now() - make_interval(days => :d)"
+        f"select {', '.join(_LOG_COLS)} from forecast_log "
+        "where as_of >= now() - make_interval(days => :d)" + (" and zone = :z" if zone else "")
     )
     df = _read_or_empty(sql, {"z": zone, "d": days})
-    return df if not df.empty else pd.DataFrame(columns=["as_of", "target_time", "model_version", "price_eur_mwh"])
+    return df if not df.empty else pd.DataFrame(columns=_LOG_COLS)
+
+
+def live_scoreboard(model_family: str, days: int = 30) -> dict:
+    """Track record across all zones: one forecast_log read, then each zone's price window."""
+    base = {"unit": "EUR/MWh", "model_family": model_family, "windows": [7, days]}
+    now = pd.Timestamp.now(tz="UTC")
+    if not storage.enabled():
+        return {**base, **scoreboard({}, now, (7, days))}
+    log = _read_log(None, days)
+    log = log[log["model_version"].str.startswith(f"{model_family}-")]
+    since = now.floor("D") - pd.Timedelta(days=days + 2)
+    matured = {
+        z: _matured(g, build.hourly_price(build.load_prices(z, since=since))) for z, g in log.groupby("zone")
+    }
+    return {**base, **scoreboard(matured, now, (7, days))}

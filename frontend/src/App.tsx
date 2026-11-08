@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { COUNTRY_NAME, SOURCE_LABEL, type Source, type Zone } from "./api";
 import Controls from "./components/Controls";
+import Scoreboard from "./components/Scoreboard";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
 import ZoneMap from "./components/ZoneMap";
@@ -41,7 +42,7 @@ const FlagStripe = ({ flag }: { flag: Flag }) => (
 );
 
 export default function App() {
-  const { zones, fx, forecasts, accuracy, backtest, mix, health, lastUpdated, loading, refresh } = useDashboard();
+  const { zones, fx, forecasts, accuracy, backtest, mix, scoreboard, health, lastUpdated, loading, refresh } = useDashboard();
   const [source, setSource] = useState<Source | "ALL">("ALL");
   const { theme, toggle: toggleTheme, flag, setFlag } = useTheme();
   const bt = (z: Zone) => {
@@ -194,6 +195,8 @@ export default function App() {
               </p>
             )}
           </section>
+
+          {scoreboard && ready && <Scoreboard board={scoreboard} zones={visible} money={money} />}
 
           <div className="mt-8">
             <Controls

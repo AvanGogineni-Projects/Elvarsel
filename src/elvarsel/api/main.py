@@ -60,6 +60,13 @@ def accuracy(
     return monitoring.accuracy(zone, days, model_family=config.MODEL_FAMILY)
 
 
+@app.get("/v1/scoreboard")
+def scoreboard(days: int = Query(30, ge=7, le=90, description="longest look-back window")) -> dict:
+    """Live track record over matured logged forecasts, per zone and pooled: days the
+    model beat naive-24, MAE vs naive over 7 and `days` days, and 80% range coverage."""
+    return monitoring.live_scoreboard(config.MODEL_FAMILY, days)
+
+
 @app.get("/v1/backtest")
 def backtest() -> dict:
     """Walk-forward backtest per zone (written by `python -m elvarsel.models.report`):

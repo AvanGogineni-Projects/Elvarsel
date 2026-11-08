@@ -1,4 +1,4 @@
-import type { Accuracy, Forecast, Fx } from "./api";
+import type { Accuracy, Forecast, ForecastPoint, Fx } from "./api";
 
 export type Unit = "MWh" | "kWh";
 
@@ -78,4 +78,19 @@ export function stats(f: Forecast): ZoneStats {
     troughHour: min.time,
     spread: max.price_eur_mwh - min.price_eur_mwh,
   };
+}
+
+// The cheapest run of `len` back-to-back hours, e.g. when to run the dishwasher: start and
+// last are the run's own point times, end = last + 1h. A gap (or DST jump) breaks a run.
+type Window = { start: string; last: string; end: string; avg: number };
+export function cheapestWindow(pts: ForecastPoint[], len = 3): Window | null {
+  let best: Window | null = null;
+  for (let i = 0; i + len <= pts.length; i++) {
+    const run = pts.slice(i, i + len);
+    const last = Date.parse(run[len - 1].time);
+    if (last - Date.parse(run[0].time) !== (len - 1) * 3600_000) continue;
+    const avg = run.reduce((a, p) => a + p.price_eur_mwh, 0) / len;
+    if (!best || avg < best.avg) best = { start: run[0].time, last: run[len - 1].time, end: new Date(last + 3600_000).toISOString(), avg };
+  }
+  return best;
 }

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
-import { COUNTRY_NAME, type Source, type Zone } from "./api";
+import { COUNTRY_NAME, SOURCE_LABEL, type Source, type Zone } from "./api";
 import Controls from "./components/Controls";
 import OverviewChart from "./components/OverviewChart";
 import ZoneDetail from "./components/ZoneDetail";
@@ -95,6 +95,23 @@ export default function App() {
   const byAvg = codes.map((z) => ({ z, avg: stats(forecasts[z]!).avg })).sort((a, b) => a.avg - b.avg);
   const scope = country === "ALL" ? "the Nordic market" : COUNTRY_NAME[country] ?? country;
 
+  // Energy filter: the selected source's share per visible zone, and across them
+  // weighted by each zone's generation (big producers count more), plus the leader.
+  const shares: Partial<Record<Zone, number>> = {};
+  let energy: { pct: number; top: Zone; topPct: number } | null = null;
+  if (source !== "ALL" && mix) {
+    let mw = 0, srcMw = 0;
+    for (const z of visible) {
+      const m = mix.zones[z.code];
+      if (!m) continue;
+      shares[z.code] = m.share[source];
+      mw += m.total_mw;
+      srcMw += (m.share[source] / 100) * m.total_mw;
+      if (!energy || m.share[source] > energy.topPct) energy = { pct: 0, top: z.code, topPct: m.share[source] };
+    }
+    if (energy && mw > 0) energy.pct = (100 * srcMw) / mw;
+  }
+
   return (
     <div className="min-h-screen">
       <div className="w-full px-4 pb-10 sm:px-6 lg:px-10">
@@ -162,6 +179,18 @@ export default function App() {
                   {byAvg[byAvg.length - 1].z} {eur(money.conv(byAvg[byAvg.length - 1].avg), money.digits)}
                 </span>{" "}
                 {money.label}.
+                {energy && (
+                  <>
+                    {" "}
+                    {SOURCE_LABEL[source as Source]} supplied{" "}
+                    <span className="font-mono font-medium text-fg">{energy.pct.toFixed(0)}%</span> of its generation over
+                    the last {mix?.window_days ?? 7} days, most in{" "}
+                    <span className="font-mono font-medium text-fg">
+                      {energy.top} ({energy.topPct.toFixed(0)}%)
+                    </span>
+                    .
+                  </>
+                )}
               </p>
             )}
           </section>
@@ -192,6 +221,9 @@ export default function App() {
                 money={money}
                 onSelect={setSelected}
                 onToggle={toggle}
+                source={source}
+                shares={shares}
+                mixDays={mix?.window_days}
               />
             ) : ready ? (
               <div className="caps grid h-[330px] place-items-center text-mute">No zone in this filter has data yet</div>

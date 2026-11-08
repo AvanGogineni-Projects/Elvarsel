@@ -346,12 +346,93 @@ original model never beat naive-24 at all.
 `python -m elvarsel.daily` runs every day at 09:37 UTC (backup 10:23 UTC if the first did not succeed)
 (`.github/workflows/daily.yml`), before the 12:00 CET gate:
 1. ingest yesterday and today (prices, load, tomorrow's load forecast) and
-   NWP from D-2 to D+2 into the database;
-2. retrain the Nordic model;
-3. log each zone's next-day forecast to `forecast_log`, so live accuracy
+   NWP from D-2 to D+8 (three forecast vintages) into the database;
+2. retrain the Nordic models (one per lead day, D+1..D+7);
+3. log each zone's next-day forecast and 7-day outlook to `forecast_log`, so live accuracy
    accrues every day, not only when someone opens the dashboard.
 
 A failing zone is reported and the job exits non-zero, but it never blocks
 the other zones. The API refreshes its model hourly, so it serves the job's
 data. The workflow needs `DATABASE_URL` and `ENTSOE_API_TOKEN` as GitHub repo
 secrets.
+
+## 6. Multi-day outlook (D+2..D+7)
+
+The next-day forecast now has a 7-day outlook alongside it. "Lead k" means the
+target day is k days after the last known price day, so lead 1 is the normal
+auction forecast.
+
+### Design: point-in-time at every lead
+
+`build_features(..., lead=k)` uses the same code for every lead, with each
+input pushed back to what is known at the gate:
+
+- **Price lags** move back 24 h for each extra lead day. At lead 3, "lag 24h"
+  is really 72 h old. `lag_168h` stays fixed at the same hour a week before the
+  target, which is always known for leads up to 7.
+- **Daily stats** (`d1_*`, `w1_*`) come from the last known day, D-k.
+- **Actual load lags** move back the same way. The ENTSO-E day-ahead load
+  forecast only exists for D+1, so only lead 1 uses it.
+- **Weather (NWP)** for lead k needs a forecast issued at least k+1 days before
+  the target, which is Open-Meteo `previous_day{n}` with n ≥ k+1. Only vintages
+  2, 4 and 7 are stored (see the storage note below), so leads 2–3 use day 4,
+  leads 4–6 use day 7, and lead 7 has no weather input (21 features instead of 28).
+- **Calendar and holidays** are known in advance, so they are used at every lead.
+
+The serving-equals-training test now covers leads 2 and 7 as well.
+
+### Per-lead models or one model with a lead feature? (13 weekly origins)
+
+| Lead | Per-lead, NWP | Per-lead, no NWP | One stacked model | Naive | Week |
+|---:|---:|---:|---:|---:|---:|
+| 2 | **28.6** | 35.6 | 31.0 | 40.7 | 43.6 |
+| 3 | **32.3** | 39.6 | 32.8 | 44.5 | 43.6 |
+| 4 | 34.7 | 41.0 | **34.6** | 46.2 | 43.6 |
+| 5 | 37.5 | 42.5 | **36.7** | 45.6 | 43.6 |
+| 6 | 38.5 | 42.2 | **36.9** | 44.2 | 43.6 |
+| 7 | 40.8 | 40.8 | **40.3** | 43.6 | 43.6 |
+
+These numbers use all six vintages, before the storage limit applied. The
+stacked model has to train with the largest gap (144 h, so lead 7 never sees a
+price it couldn't know), and that costs leads 2–3 more than the 1–2 EUR it gains
+at leads 4–7. **Per-lead models were kept**: one point model plus the two
+quantile models for each lead, 21 fits per day. Weather is the biggest single
+input. Without it D+2 is 25% worse.
+
+**Storage tradeoff.** Each stored NWP vintage takes about 65 MB, and Supabase's
+free tier is 500 MB, so all six vintages would not fit. With only vintages 4
+and 7 (plus day 2 for D+1), D+2..D+6 scored 29.8 / 32.3 / 37.4 / 39.1 / 38.5,
+about 1–2 EUR worse at leads 2 and 4–5 than with every vintage. That costs
+about 130 MB. The DB is about 358 MB after the backfill.
+
+### Error growth by lead (52 weekly origins)
+
+From [outlook-results.md](outlook-results.md). Reproduce with
+`python -m elvarsel.models.report --outlook --n-splits 52`:
+
+| Lead | Model MAE | Naive MAE | Week MAE | vs naive | vs week | 80% coverage |
+|---:|---:|---:|---:|---:|---:|---:|
+| D+1 | 16.7 | 25.0 | 34.4 | −33% | −51% | 83% |
+| D+2 | 22.6 | 32.7 | 34.4 | −31% | −35% | 80% |
+| D+3 | 24.0 | 34.7 | 34.4 | −31% | −30% | 78% |
+| D+4 | 27.9 | 35.6 | 34.4 | −22% | −19% | 77% |
+| D+5 | 28.9 | 35.7 | 34.4 | −19% | −16% | 75% |
+| D+6 | 29.1 | 34.8 | 34.4 | −17% | −16% | 75% |
+| D+7 | 32.8 | 34.4 | 34.4 | −5% | −5% | 76% |
+
+Every lead beats both baselines, so all seven ship (`forecast.LEADS`). Error
+roughly doubles from D+1 to D+7. Without a weather input, D+7 is only 5% better
+than "same hour last week", so read it as a weekly shape, not a price call.
+
+**The range is too narrow at long leads.** The same 4%/96% quantiles give 80%
+coverage at D+2 but only 75–78% from D+3 onward. The band still widens with lead
+(it's fitted per lead), but it doesn't widen enough. A follow-up could use wider
+quantiles per lead (for example 2%/98% from D+4).
+
+### Serving
+
+The daily job logs all seven days to `forecast_log` (about 2,000 rows per day).
+`/v1/forecast?days=k` returns the first k local days, and the default
+(`days=1`) is unchanged. `/v1/accuracy` keeps its headline next-day only. Its
+`by_horizon` spans the whole outlook. The dashboard's zone chart shows the
+7-day outlook with its range.

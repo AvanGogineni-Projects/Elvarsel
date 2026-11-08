@@ -143,8 +143,9 @@ export const fetchGeneration = (zone: Zone, days = 7, signal?: AbortSignal) =>
 export const fetchZones = (signal?: AbortSignal) =>
   getJSON<{ zones: ZoneInfo[]; fx: Fx | null }>(`/v1/zones`, signal);
 
-export const fetchForecast = (zone: Zone, signal?: AbortSignal) =>
-  getJSON<Forecast>(`/v1/forecast?zone=${zone}`, signal);
+// days = 1: the next day (24 hours); up to 7 for the outlook, whose 80% range widens with lead.
+export const fetchForecast = (zone: Zone, signal?: AbortSignal, days = 1) =>
+  getJSON<Forecast>(`/v1/forecast?zone=${zone}&days=${days}`, signal);
 
 export const fetchAccuracy = (zone: Zone, days = 7, signal?: AbortSignal) =>
   getJSON<Accuracy>(`/v1/accuracy?zone=${zone}&days=${days}`, signal);

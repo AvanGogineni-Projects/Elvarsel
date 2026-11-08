@@ -30,6 +30,8 @@ import { HEALTH_STYLE, type ZoneBacktest } from "./ZoneTile";
 interface Props {
   zone: ZoneInfo;
   forecast: Forecast;
+  /** Up to 7 days, for the chart only; tomorrow's numbers come from `forecast`. */
+  outlook?: Forecast | null;
   prices: Prices | null;
   accuracy: Accuracy | null;
   loading: boolean;
@@ -54,8 +56,8 @@ const dayHour = (iso: string) =>
 const dayOnly = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 // Actual price over the window, the logged model forecast where one exists, and the
-// naive baseline (actual price one day earlier) for every hour, then tomorrow's
-// forecast with its 80% range after the last actual.
+// naive baseline (actual price one day earlier) for every hour, then the
+// forecast outlook (up to 7 days) with its 80% range, which widens with lead, after the last actual.
 type Row = {
   time: string;
   actual?: number;
@@ -89,6 +91,11 @@ function series(prices: Prices | null, accuracy: Accuracy | null, next: Forecast
   return [...past, ...ahead];
 }
 
+function outlookDays(f: Forecast) {
+  const d = Math.round(f.forecast.length / 24);
+  return d > 1 ? `${d} days` : "day";
+}
+
 function Metric({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: string }) {
   return (
     <div>
@@ -102,6 +109,7 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
 export default function ZoneDetail({
   zone,
   forecast,
+  outlook,
   prices,
   accuracy,
   loading,
@@ -129,7 +137,8 @@ export default function ZoneDetail({
     : [];
   const genLabel = source === "ALL" ? "Generation by source" : `${SOURCE_LABEL[source]} generation`;
   const h = HEALTH_STYLE[health(accuracy)];
-  const data = useMemo(() => series(prices, accuracy, forecast, money), [prices, accuracy, forecast, money]);
+  const ahead = outlook ?? forecast;
+  const data = useMemo(() => series(prices, accuracy, ahead, money), [prices, accuracy, ahead, money]);
   const cheap = cheapestWindow(forecast.forecast);
   const peak = stats(forecast);
   const scored = accuracy?.mae != null;
@@ -241,13 +250,13 @@ export default function ZoneDetail({
                       ifOverflow="hidden"
                     />
                   )}
-                  <Area name="Tomorrow 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.14} isAnimationActive={false} />
+                  <Area name="Outlook 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.14} isAnimationActive={false} />
                   <Line name="Actual" dataKey="actual" type="linear" stroke={p.fg} strokeWidth={1.25} dot={false} isAnimationActive={false} />
                   {showBase && (
                     <Line name="Baseline (yesterday)" dataKey="baseline" type="linear" stroke={p.baseline} strokeWidth={1} strokeDasharray="2 3" dot={false} isAnimationActive={false} />
                   )}
                   <Line name="Model forecast" dataKey="forecast" type="monotone" stroke={color} strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
-                  <Line name="Tomorrow" dataKey="next" type="linear" stroke={color} strokeWidth={2.25} strokeDasharray="5 3" dot={false} isAnimationActive={false} />
+                  <Line name="Forecast" dataKey="next" type="linear" stroke={color} strokeWidth={2.25} strokeDasharray="5 3" dot={false} isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             ) : (
@@ -259,7 +268,7 @@ export default function ZoneDetail({
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-fg" /> Actual</span>
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: color }} /> Model forecast (logged)</span>
               {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Tomorrow · 80% range</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Forecast, next {outlookDays(ahead)} · 80% range</span>
             </div>
           </div>
 

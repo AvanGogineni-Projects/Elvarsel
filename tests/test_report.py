@@ -18,3 +18,12 @@ def test_write_report_renders_table(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "| SE3 | 697 | 10 | 53.75 | 68.28 | 65.33 | 79.55 | +21.3% |" in text
     assert "MAPE is omitted" in text
+
+
+def test_write_outlook_renders_one_row_per_lead(tmp_path):
+    summary = pd.DataFrame([{
+        "lead": 3, "features": 30, "model_mae": 30.0, "baseline_mae": 40.0, "week_mae": 50.0,
+        "model_rmse": 45.0, "coverage": 0.81,
+    }])
+    text = report.write_outlook(summary, path=tmp_path / "o.md", n_splits=52).read_text(encoding="utf-8")
+    assert "| D+3 | 30 | 30.00 | 40.00 | 50.00 | +25.0% | +40.0% | 45.00 | 81% |" in text

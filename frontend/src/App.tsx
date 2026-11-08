@@ -278,6 +278,7 @@ export default function App() {
               <ZoneDetail
                 zone={selectedInfo}
                 forecast={forecasts[selected]!}
+                outlook={history.outlook}
                 prices={history.prices}
                 accuracy={history.acc}
                 loading={history.loading}

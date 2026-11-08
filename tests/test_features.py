@@ -172,3 +172,51 @@ def test_holiday_flags_use_the_zone_country_and_local_date():
 
 def test_zone_without_entsoe_rows_yields_no_prices_not_a_crash():
     assert build.entsoe_prices(pd.DataFrame()).empty
+
+
+def test_lead_takes_lags_and_daily_stats_from_the_last_known_day():
+    rng = np.random.default_rng(2)
+    raw = _raw_hourly(rng.uniform(0, 200, 20 * 24), start="2026-05-01T22:00:00Z")
+    price = build.hourly_price(raw)
+    ent = pd.concat([_entsoe_load_15min(20), _entsoe_load_15min(20).assign(metric="load_forecast_mw")])
+    df = build.build_features(raw, "SE3", entsoe_raw=ent, lead=3)
+    t = df.index[30]
+    assert df.loc[t, "lag_24h"] == price[t - pd.Timedelta(hours=72)]  # same hour of the last known day
+    assert df.loc[t, "lag_144h"] == price[t - pd.Timedelta(hours=192)]
+    assert df.loc[t, "lag_168h"] == price[t - pd.Timedelta(hours=168)]  # absolute: a week before the target
+    day = price.index.tz_convert("Europe/Stockholm").tz_localize(None).normalize()
+    d = t.tz_convert("Europe/Stockholm").tz_localize(None).normalize() - pd.Timedelta(days=3)
+    assert df.loc[t, "d1_mean"] == pytest.approx(price[day == d].mean())
+    feats = build.feature_columns(df)
+    assert "load_lag_48h" in feats and not any(c.startswith("load_fc") for c in feats)  # next-day only
+    with pytest.raises(ValueError):
+        build.build_features(raw, "SE3", lead=8)
+
+
+@pytest.mark.parametrize("lead", [2, 7])
+def test_serving_rows_match_training_rows_for_every_lead(lead):
+    rng = np.random.default_rng(3)
+    raw = _raw_hourly(rng.uniform(0, 200, 24 * 24), start="2026-05-01T22:00:00Z")
+    full = build.build_features(raw, "SE3", lead=lead)
+    cut = raw.iloc[: (24 - lead) * 24]  # known through the day before the target day's lead window
+    served = build.build_features(cut, "SE3", horizon=24 * lead, lead=lead)
+    future = served[served["target"].isna()].tail(24)  # what forecast.py serves for this lead
+    assert future.index[0] == full.index[-24]
+    cols = build.feature_columns(full)
+    pd.testing.assert_frame_equal(future[cols], full.loc[future.index, cols], check_freq=False)
+
+
+def test_nwp_uses_a_vintage_issued_before_the_gate_for_the_lead():
+    from elvarsel.ingest import openmeteo
+
+    idx = pd.date_range("2026-05-01T00:00:00Z", periods=12 * 24, freq="1h", tz="UTC")
+    nwp = pd.concat(
+        [openmeteo._long(pd.Series(float(n), index=idx), "SE3", m) for n in openmeteo.VINTAGE_DAYS for m in openmeteo.metrics(n)],
+        ignore_index=True,
+    )
+    price = pd.DataFrame({"time_start": idx, "eur_per_kwh": 0.05})
+    assert (build.build_features(price, "SE3", nwp_raw=nwp)["nwp_wind"] == 2.0).all()  # previous_day2
+    assert (build.build_features(price, "SE3", nwp_raw=nwp, lead=3)["nwp_temp"] == 4.0).all()  # previous_day4
+    assert (build.build_features(price, "SE3", nwp_raw=nwp, lead=4)["nwp_wind"] == 7.0).all()  # day5 not stored -> day7
+    # Lead 7 would need previous_day8, which Open-Meteo does not keep: no NWP columns.
+    assert not any(c.startswith("nwp") for c in build.feature_columns(build.build_features(price, "SE3", nwp_raw=nwp, lead=7)))

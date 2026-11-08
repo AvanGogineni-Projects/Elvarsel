@@ -30,6 +30,10 @@ import pandas as pd
 from elvarsel import config, storage
 
 PRICE_LAGS: tuple[int, ...] = (24, 48, 72, 144, 168)
+# lead = days from the last known price day to the target day (1 = next day, the auction
+# forecast). Lags/daily stats are relative to the last known day: shifted 24h per extra
+# lead day. lag_168h stays absolute (same hour a week before the target), known for lead <= 7.
+MAX_LEAD = 7
 LOAD_LAGS: tuple[int, ...] = (48, 168)
 WEATHER_FIELDS: tuple[str, ...] = ("air_temperature", "wind_speed")
 LOAD_FORECAST = "load_forecast_mw"
@@ -141,6 +145,7 @@ def build_features(
     weather_raw: pd.DataFrame | None = None,
     nwp_raw: pd.DataFrame | None = None,
     horizon: int = 0,
+    lead: int = 1,
 ) -> pd.DataFrame:
     """Supervised table: target + features, indexed by UTC hour.
 
@@ -148,7 +153,15 @@ def build_features(
     the rows the serving path predicts, built by the same code as training rows.
     Price lags gate warm-up (rows without them are dropped); load/weather may be
     NaN and are left for the model to handle.
+
+    `lead` = k builds every row as if forecast k days ahead, at the gate on the
+    target day minus k: price/load lags and daily stats come from the last known
+    day (k days back), the day-ahead load forecast is used only for k = 1 (it is
+    not published further ahead), and NWP uses a vintage issued before that gate.
     """
+    if not 1 <= lead <= MAX_LEAD:
+        raise ValueError(f"lead must be 1..{MAX_LEAD}")
+    off = 24 * (lead - 1)
     price = hourly_price(price_raw)
     last_known = price.index.max()
     if horizon and not price.empty:
@@ -170,11 +183,11 @@ def build_features(
         df["holiday_d1"] = (day - pd.Timedelta(days=1)).isin(pd.DatetimeIndex(list(cal))).astype(int)
 
     for h in PRICE_LAGS:
-        df[f"lag_{h}h"] = df["price_eur_mwh"].shift(h)
+        df[f"lag_{h}h"] = df["price_eur_mwh"].shift(h if h == 168 else h + off)
 
     daily = df["price_eur_mwh"].groupby(day).agg(["mean", "min", "max", "std", "last"])
     daily["week_mean"] = daily["mean"].rolling(7).mean()
-    d1 = _prev_day(daily, day, 1)
+    d1 = _prev_day(daily, day, lead)
     for c in ("mean", "min", "max", "std", "last"):
         df[f"d1_{c}"] = d1[c].to_numpy()
     df["w1_mean"] = d1["week_mean"].to_numpy()
@@ -182,23 +195,24 @@ def build_features(
     if entsoe_raw is not None and not entsoe_raw.empty:
         load = hourly_load(entsoe_raw).reindex(df.index)
         for h in LOAD_LAGS:
-            df[f"load_lag_{h}h"] = load.shift(h)
-        df["d2_load_mean"] = _prev_day(load.groupby(day).mean().to_frame("m"), day, 2)["m"].to_numpy()
-        _add_fundamentals(df, entsoe_raw, day)
+            df[f"load_lag_{h}h"] = load.shift(h + off)
+        df["d2_load_mean"] = _prev_day(load.groupby(day).mean().to_frame("m"), day, 1 + lead)["m"].to_numpy()
+        if lead == 1:  # ENTSO-E publishes the load forecast only for the next day
+            _add_fundamentals(df, entsoe_raw, day)
 
     if weather_raw is not None and not weather_raw.empty:
         _add_weather(df, weather_raw)
 
     if nwp_raw is not None and not nwp_raw.empty:
-        _add_nwp(df, nwp_raw, zone, day)
+        _add_nwp(df, nwp_raw, zone, day, lead)
 
     df["zone"] = zone
     df = df.dropna(subset=[f"lag_{h}h" for h in PRICE_LAGS])
     return df[df["target"].notna() | (df.index > last_known)]
 
 
-def load_features(zone: str, horizon: int = 0) -> pd.DataFrame:
-    """Feature table for one zone from the store (training rows, + `horizon` future rows).
+def load_raw(zone: str) -> dict:
+    """One zone's raw inputs from the store, as `build_features` keyword arguments.
 
     SMHI weather is not used: it has no history (only the live ~84h forecast), so
     Open-Meteo's archived NWP replaces it as the weather input.
@@ -208,13 +222,17 @@ def load_features(zone: str, horizon: int = 0) -> pd.DataFrame:
     # read instead of a second query.
     entsoe, nwp = load_entsoe(zone, metrics=MODEL_METRICS), load_nwp(zone)
     prices = load_prices(zone) if zone in config.ELPRIS_ZONES else entsoe_prices(entsoe)
-    return build_features(
-        prices,
-        zone,
-        entsoe_raw=entsoe if not entsoe.empty else None,
-        nwp_raw=nwp if not nwp.empty else None,
-        horizon=horizon,
-    )
+    return {
+        "price_raw": prices,
+        "zone": zone,
+        "entsoe_raw": entsoe if not entsoe.empty else None,
+        "nwp_raw": nwp if not nwp.empty else None,
+    }
+
+
+def load_features(zone: str, horizon: int = 0, lead: int = 1) -> pd.DataFrame:
+    """Feature table for one zone from the store (training rows, + `horizon` future rows)."""
+    return build_features(**load_raw(zone), horizon=horizon, lead=lead)
 
 
 def stack(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -240,10 +258,15 @@ def _add_fundamentals(df: pd.DataFrame, entsoe_raw: pd.DataFrame, day: pd.Dateti
     df["load_fc_vs_d1"] = load_fc - load_fc.shift(24)
 
 
-def _add_nwp(df: pd.DataFrame, nwp_raw: pd.DataFrame, zone: str, day: pd.DatetimeIndex) -> None:
-    """Open-Meteo wind/temperature forecast for the target hour, issued >= 48h ahead
-    (see ingest.openmeteo), plus the system-wide Nordic wind."""
-    from elvarsel.ingest.openmeteo import NORDIC, TEMP, WIND
+def _add_nwp(df: pd.DataFrame, nwp_raw: pd.DataFrame, zone: str, day: pd.DatetimeIndex, lead: int) -> None:
+    """Open-Meteo wind/temperature forecast for the target hour, from the vintage issued
+    before the gate `lead` days ahead (see ingest.openmeteo), plus the system-wide Nordic wind.
+    No admissible vintage (lead 7 would need previous_day8) -> no NWP columns."""
+    from elvarsel.ingest.openmeteo import NORDIC, metrics, vintage_for
+
+    if (vintage := vintage_for(lead)) is None:
+        return
+    WIND, TEMP = metrics(vintage)
 
     def series(z: str, metric: str) -> pd.Series:
         r = nwp_raw[(nwp_raw["zone"] == z) & (nwp_raw["metric"] == metric)]

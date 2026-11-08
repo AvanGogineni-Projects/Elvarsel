@@ -2,7 +2,7 @@
 
 The API never trains. The daily job (python -m elvarsel.daily, a scheduled
 GitHub Action) retrains the Nordic model and logs every zone's next-day
-forecast with its 80% range to `forecast_log`; this service reads the latest
+forecast plus the outlook days after it, each with its 80% range, to `forecast_log`; this service reads the latest
 run, plus price and accuracy windows, from Postgres. So it imports no ML
 libraries, starts in about a second, and fits a serverless function (Vercel).
 
@@ -42,10 +42,14 @@ def health() -> dict[str, str]:
 
 
 @app.get("/v1/forecast")
-def forecast(zone: str = Query(..., description="bidding zone, e.g. SE3, NO1, DK2, FI")) -> dict:
-    """The latest next-day forecast the daily job logged for this zone."""
+def forecast(
+    zone: str = Query(..., description="bidding zone, e.g. SE3, NO1, DK2, FI"),
+    days: int = Query(1, ge=1, le=7, description="1 = next day (24 hours); up to 7 for the outlook"),
+) -> dict:
+    """The latest forecast run the daily job logged for this zone: the next day, or
+    `days` days of outlook with their (widening) 80% ranges."""
     _known(zone)
-    body = monitoring.latest_forecast(zone, config.MODEL_FAMILY)
+    body = monitoring.latest_forecast(zone, config.MODEL_FAMILY, days)
     if body is None:  # no run logged yet (e.g. before the first daily job)
         raise HTTPException(status_code=503, detail=f"no forecast for {zone} yet")
     return body

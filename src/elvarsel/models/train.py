@@ -46,12 +46,19 @@ def evaluate(
     test_days: int = 7,
     track: bool = True,
     params: dict | None = None,
+    gap_hours: int = 0,
+    quantiles: tuple[float, float] | None = None,
 ) -> dict:
     """Rolling-origin backtest. Returns per-split and mean model/baseline scores,
-    plus the same means per zone (`by_zone`) when `df` stacks several zones."""
+    plus the same means per zone (`by_zone`) when `df` stacks several zones.
+
+    `baseline` is naive-24 (same hour of the last known day), `week` is same hour last
+    week. `gap_hours` drops training rows not yet known at the earliest test row's
+    forecast time (24 per lead day beyond the first). `quantiles` also fits the
+    low/high models and reports `coverage`: the share of actuals inside the range."""
     params = {**LGBM_PARAMS, **(params or {})}
     feats = build.feature_columns(df)
-    splits = rolling_origin_splits(df.index, test_days=test_days, n_splits=n_splits)
+    splits = rolling_origin_splits(df.index, test_days=test_days, n_splits=n_splits, gap_hours=gap_hours)
     if not splits:
         raise ValueError("not enough data for the requested backtest window")
 
@@ -62,7 +69,15 @@ def evaluate(
         x_te, y_te = df.loc[test_mask, feats], df.loc[test_mask, "target"].to_numpy()
         last_model = LGBMRegressor(**params).fit(x_tr, y_tr)
         pred = last_model.predict(x_te)
+        cover = {}
+        if quantiles:
+            lo, hi = (
+                LGBMRegressor(**{**params, "objective": "quantile", "alpha": q}).fit(x_tr, y_tr).predict(x_te)
+                for q in quantiles
+            )
+            cover = {"coverage": float(np.mean((y_te >= np.minimum(lo, pred)) & (y_te <= np.maximum(hi, pred))))}
         base = baseline.naive(df.loc[test_mask]).to_numpy()
+        week = baseline.last_week(df.loc[test_mask]).to_numpy()
         per_split.append(
             {
                 "split": i,
@@ -70,12 +85,16 @@ def evaluate(
                 "n_test": int(test_mask.sum()),
                 "model": _score(y_te, pred),
                 "baseline": _score(y_te, base),
+                "week": _score(y_te, week),
+                **cover,
             }
         )
         zones = df.loc[test_mask, "zone"].to_numpy()
         for z in np.unique(zones):
             m = zones == z
-            by_zone.setdefault(z, []).append({"model": _score(y_te[m], pred[m]), "baseline": _score(y_te[m], base[m])})
+            by_zone.setdefault(z, []).append(
+                {"model": _score(y_te[m], pred[m]), "baseline": _score(y_te[m], base[m]), "week": _score(y_te[m], week[m])}
+            )
 
     agg = _aggregate(per_split)
     if track:
@@ -85,9 +104,11 @@ def evaluate(
 
 def _aggregate(per_split: list[dict]) -> dict[str, float]:
     out: dict[str, float] = {}
-    for who in ("model", "baseline"):
+    for who in ("model", "baseline", "week"):
         for m in ("mae", "rmse", "mape"):
             out[f"{who}_{m}"] = float(np.nanmean([s[who][m] for s in per_split]))
+    if "coverage" in per_split[0]:
+        out["coverage"] = float(np.mean([s["coverage"] for s in per_split]))
     out["mae_improvement_pct"] = (
         (1.0 - out["model_mae"] / out["baseline_mae"]) * 100.0
         if out["baseline_mae"]

@@ -4,7 +4,7 @@ The daily job persists every zone's forecast (point + 80% range) to
 `forecast_log`; the API serves the latest one from there. Once the forecast
 horizon has passed and the realized day-ahead prices land in `raw_price`, we can
 score what the live model actually predicted: rolling MAE/RMSE/bias per zone and
-error-by-horizon (how error grows 1h..24h ahead). This is drift detection — a
+error-by-horizon (how error grows from 1h out to the end of the 7-day outlook). This is drift detection — a
 rising MAE vs the backtest baseline means the live model is degrading.
 
 DB-gated like the rest of storage: when DATABASE_URL is unset these are no-ops
@@ -50,7 +50,7 @@ def ensure_table() -> None:
 
 
 def log_forecast(zone: str, as_of: str, model_version: str, points: list[dict]) -> int:
-    """Persist one served forecast (24 points). Returns rows written, 0 if DB off.
+    """Persist one forecast run (24 points per lead day). Returns rows written, 0 if DB off.
 
     Best-effort by contract: callers wrap this so a logging failure never breaks
     serving. Idempotent on (zone, as_of, target_time) — re-serving overwrites.
@@ -94,13 +94,18 @@ def score(log: pd.DataFrame, realized: pd.Series) -> dict:
     if df.empty:
         return empty
 
-    y = df["actual"].to_numpy()
-    p = df["price_eur_mwh"].to_numpy()
 
     by_horizon = [
         {"h": int(h), "mae": metrics.mae(g["actual"].to_numpy(), g["price_eur_mwh"].to_numpy()), "n": len(g)}
         for h, g in sorted(df.groupby("h"), key=lambda kv: kv[0])
     ]
+    # The headline scores the next-day forecast (the one the backtest reports); outlook
+    # days only feed by_horizon, so a 7-day run can't make next-day accuracy look worse.
+    df = df[_day_offset(df["as_of"], df["target_time"]) == 0]
+    if df.empty:
+        return {**empty, "by_horizon": by_horizon}
+    y = df["actual"].to_numpy()
+    p = df["price_eur_mwh"].to_numpy()
     has_base = df.dropna(subset=["baseline"])
     # Forecast vs actual per hour for charting; if an hour was forecast more than once, show the latest.
     latest = df.sort_values("as_of").drop_duplicates("target_time", keep="last").sort_values("target_time")
@@ -171,7 +176,10 @@ def scoreboard(matured: dict[str, pd.DataFrame], now: pd.Timestamp, windows: tup
     for each look-back window (by delivery hour). If an hour was forecast more than
     once, the latest forecast counts, as on the chart."""
     latest = {
-        z: df.sort_values("as_of").drop_duplicates("target_time", keep="last") for z, df in matured.items()
+        z: df[_day_offset(df["as_of"], df["target_time"]) == 0]
+        .sort_values("as_of")
+        .drop_duplicates("target_time", keep="last")
+        for z, df in matured.items()
     }
 
     def win(df: pd.DataFrame) -> dict:
@@ -183,9 +191,19 @@ def scoreboard(matured: dict[str, pd.DataFrame], now: pd.Timestamp, windows: tup
     return {"overall": win(pooled), "zones": {z: win(df) for z, df in latest.items()}}
 
 
-def latest_forecast(zone: str, model_family: str) -> dict | None:
+def _day_offset(as_of: pd.Series, target: pd.Series) -> pd.Series:
+    """Local calendar days from the run's first forecast day (0 = next day)."""
+    def day(s: pd.Series) -> pd.Series:
+        return pd.to_datetime(s, utc=True).dt.tz_convert("Europe/Stockholm").dt.tz_localize(None).dt.normalize()
+
+    # Count from each run's first forecast hour, not as_of, so it holds whatever as_of marks.
+    first = pd.to_datetime(target, utc=True).groupby(pd.to_datetime(as_of, utc=True).to_numpy()).transform("min")
+    return (day(target) - day(first)).dt.days
+
+
+def latest_forecast(zone: str, model_family: str, days: int = 1) -> dict | None:
     """The newest logged forecast run for a zone from `model_family`, in the API's
-    response shape, or None if there is none (or the DB is off)."""
+    response shape (its first `days` days), or None if there is none (or the DB is off)."""
     if not storage.enabled():
         return None
     from sqlalchemy import text
@@ -197,13 +215,15 @@ def latest_forecast(zone: str, model_family: str) -> dict | None:
         "order by target_time"
     )
     df = _read_or_empty(sql, {"z": zone, "fam": f"{model_family}-%"})
-    return forecast_body(zone, df)
+    return forecast_body(zone, df, days)
 
 
-def forecast_body(zone: str, df: pd.DataFrame) -> dict | None:
-    """Pure: logged rows of one run -> {zone, model_version, as_of, unit, forecast}."""
+def forecast_body(zone: str, df: pd.DataFrame, days: int = 1) -> dict | None:
+    """Pure: logged rows of one run -> {zone, model_version, as_of, unit, forecast},
+    keeping the first `days` local days (1 = the 24 next-day hours)."""
     if df.empty:
         return None
+    df = df[(_day_offset(df["as_of"], df["target_time"]) < days).to_numpy()]
 
     def r(v):  # rows logged before the range columns existed have no low/high
         return None if pd.isna(v) else round(float(v), 2)

@@ -1,4 +1,4 @@
-"""Daily job: ingest -> retrain -> forecast -> log, for every zone.
+"""Daily job: ingest -> retrain -> forecast (next day + outlook) -> log, for every zone.
 
 Run it before the ~12:00 CET day-ahead gate (the GitHub Actions schedule runs it
 at 09:37 UTC, with a 10:23 backup). It is the only place the model trains: it writes straight to the
@@ -46,7 +46,8 @@ def _ingest_zone(zone: str, today: dt.date) -> tuple[list[str], pd.DataFrame | N
             errors.append(f"ingest {zone} {name}: {type(e).__name__}: {e}")
     nwp = None
     try:
-        nwp = openmeteo.fetch(zone, today - dt.timedelta(days=2), today + dt.timedelta(days=2))
+        # Through the end of the outlook: lead k's target day needs the previous_day{k+1} vintage.
+        nwp = openmeteo.fetch(zone, today - dt.timedelta(days=2), today + dt.timedelta(days=fc.LEADS[-1] + 1))
         storage.upsert(nwp, "raw_nwp")
     except Exception as e:  # noqa: BLE001
         # A warning, not a failure: each run re-fetches a 5-day window, so the
@@ -59,7 +60,7 @@ def _ingest_zone(zone: str, today: dt.date) -> tuple[list[str], pd.DataFrame | N
 
 def ingest(today: dt.date) -> list[str]:
     """Yesterday + today: prices and actual load; fundamentals through tomorrow;
-    NWP from two days back through two days ahead. Zones download concurrently
+    NWP from two days back through the end of the outlook. Zones download concurrently
     (network-bound; 4 workers stay within the DB pool and ENTSO-E's rate limit)."""
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda z: _ingest_zone(z, today), config.ZONES))
@@ -71,8 +72,9 @@ def ingest(today: dt.date) -> list[str]:
 
 
 def forecast_all() -> list[str]:
-    """Retrain the Nordic model on the latest data and log every zone's next-day
-    forecast with its 80% range; the API serves these logged runs."""
+    """Retrain the Nordic models (one per lead day) on the latest data and log every
+    zone's next-day forecast plus the outlook days, each with its 80% range; the API
+    serves these logged runs."""
     try:
         version, frames = fc.train_and_forecast_all()
     except Exception as e:  # noqa: BLE001

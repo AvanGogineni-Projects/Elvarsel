@@ -49,6 +49,15 @@ def test_score_points_keep_latest_forecast_per_hour():
     assert [(p["forecast"], p["actual"]) for p in s["points"]] == [(40.0, 45.0)]
 
 
+def test_score_headline_is_next_day_only_and_outlook_feeds_by_horizon():
+    # A 2-day run from local midnight: day 1 misses by 1, day 2 (outlook) by 10.
+    log = _log("2026-10-31T23:00:00Z", [51.0] * 24 + [60.0] * 24)
+    realized = pd.Series(50.0, index=pd.date_range("2026-10-30T23:00:00Z", periods=72, freq="1h", tz="UTC"))
+    s = monitoring.score(log, realized)
+    assert s["n"] == 24 and s["mae"] == pytest.approx(1.0) and len(s["points"]) == 24
+    assert len(s["by_horizon"]) == 48 and s["by_horizon"][-1]["mae"] == pytest.approx(10.0)
+
+
 def test_score_only_counts_matured_points():
     log = _log("2026-11-01T00:00:00Z", [50.0, 60.0, 70.0])
     # only the first target has a realized actual; other two are still in the future
@@ -200,3 +209,10 @@ def test_scoreboard_endpoint_graceful_without_db(monkeypatch):
     monkeypatch.setattr(main.monitoring.storage, "enabled", lambda: False)
     body = TestClient(main.app).get("/v1/scoreboard").json()
     assert body["zones"] == {} and body["overall"]["30"]["n"] == 0 and body["windows"] == [7, 30]
+
+
+def test_scoreboard_counts_next_day_forecasts_only():
+    d1 = _matured_rows("2026-11-29", [50.0], [50.0], [60.0])
+    d2 = _matured_rows("2026-11-30", [99.0], [50.0], [60.0]).assign(as_of=d1["as_of"].iloc[0])  # same run, D+2
+    b = monitoring.scoreboard({"SE3": pd.concat([d1, d2])}, pd.Timestamp("2026-12-01T12:00Z"))
+    assert b["zones"]["SE3"]["7"]["n"] == 1 and b["zones"]["SE3"]["7"]["mae"] == pytest.approx(0.0)

@@ -94,6 +94,24 @@ export interface Backtest {
   baseline: string;
   zones: Partial<Record<Zone, { model_mae: number; baseline_mae: number; improvement_pct: number }>>;
 }
+// Live track record over matured logged forecasts, keyed by window in days ("7", "30").
+export interface ScoreSummary {
+  n: number; // scored hours (those with a naive baseline)
+  mae: number | null;
+  baseline_mae: number | null; // naive-24 on the same hours
+  days_scored: number;
+  days_beat: number; // delivery days the model's MAE beat naive's
+  coverage: number | null; // share of actuals inside the 80% range
+  n_range: number;
+}
+export interface Scoreboard {
+  unit: string;
+  windows: number[];
+  overall: Record<string, ScoreSummary>;
+  zones: Partial<Record<Zone, Record<string, ScoreSummary>>>;
+}
+export const fetchScoreboard = (signal?: AbortSignal) => getJSON<Scoreboard>("/v1/scoreboard", signal);
+
 export const fetchBacktest = (signal?: AbortSignal) => getJSON<Backtest>("/v1/backtest", signal);
 
 // Actual generation by source (ENTSO-E, realized and published with a delay).

@@ -19,6 +19,7 @@ Zone "NORDIC" holds the mean wind over all zones' sites (system-wide wind).
 from __future__ import annotations
 
 import datetime as dt
+import time
 
 import httpx
 import pandas as pd
@@ -30,6 +31,9 @@ URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 # saw transient handshake timeouts to Open-Meteo. Requests that got an answer
 # are never retried, so a real HTTP error still surfaces.
 CONNECT_RETRIES = 3
+# httpx's connect retries fire back-to-back, which a blip of a few seconds outlasts
+# (2026-11-08: 6 zones failed). So a timed-out request is retried after a pause.
+BACKOFF_S = (10, 30)
 WIND, TEMP = "nwp_wind_100m_kmh", "nwp_temp_2m_c"
 NORDIC = "NORDIC"
 VINTAGE_DAYS: tuple[int, ...] = (2, 4, 7)
@@ -65,7 +69,14 @@ def fetch(
     owned = client is None
     client = client or httpx.Client(timeout=120, transport=httpx.HTTPTransport(retries=CONNECT_RETRIES))
     try:
-        r = client.get(URL, params=params)
+        for pause in (*BACKOFF_S, None):
+            try:
+                r = client.get(URL, params=params)
+                break
+            except (httpx.ConnectError, httpx.TimeoutException):
+                if pause is None:
+                    raise
+                time.sleep(pause)
         r.raise_for_status()
         body = r.json()
     finally:

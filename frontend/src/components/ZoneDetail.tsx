@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -22,13 +23,15 @@ import {
   type Source,
   type ZoneInfo,
 } from "../api";
-import { eur, health, hhmm, type Money } from "../lib";
+import { cheapestWindow, eur, health, hhmm, stats, type Money } from "../lib";
 import { useTheme } from "../theme";
 import { HEALTH_STYLE, type ZoneBacktest } from "./ZoneTile";
 
 interface Props {
   zone: ZoneInfo;
   forecast: Forecast;
+  /** Up to 7 days, for the chart only; tomorrow's numbers come from `forecast`. */
+  outlook?: Forecast | null;
   prices: Prices | null;
   accuracy: Accuracy | null;
   loading: boolean;
@@ -106,6 +109,7 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
 export default function ZoneDetail({
   zone,
   forecast,
+  outlook,
   prices,
   accuracy,
   loading,
@@ -133,7 +137,10 @@ export default function ZoneDetail({
     : [];
   const genLabel = source === "ALL" ? "Generation by source" : `${SOURCE_LABEL[source]} generation`;
   const h = HEALTH_STYLE[health(accuracy)];
-  const data = useMemo(() => series(prices, accuracy, forecast, money), [prices, accuracy, forecast, money]);
+  const ahead = outlook ?? forecast;
+  const data = useMemo(() => series(prices, accuracy, ahead, money), [prices, accuracy, ahead, money]);
+  const cheap = cheapestWindow(forecast.forecast);
+  const peak = stats(forecast);
   const scored = accuracy?.mae != null;
   const gain =
     scored && accuracy!.baseline_mae ? (1 - accuracy!.mae! / accuracy!.baseline_mae) * 100 : null;
@@ -182,6 +189,26 @@ export default function ZoneDetail({
             </div>
           </div>
 
+          {/* When to shift flexible use tomorrow: from the served forecast, not a promise. */}
+          <dl className="mt-4 grid grid-cols-2 border-l border-t border-line">
+            {cheap && (
+              <div className="border-b border-r border-line px-3 py-2">
+                <dt className="caps text-mute">Cheapest 3 hours tomorrow</dt>
+                <dd className="mt-0.5 font-mono text-lg font-medium tabular text-fg">
+                  {hhmm(cheap.start)}–{hhmm(cheap.end)}{" "}
+                  <span className="text-sm text-soft">avg {eur(money.conv(cheap.avg), money.digits)}</span>
+                </dd>
+              </div>
+            )}
+            <div className="border-b border-r border-line px-3 py-2">
+              <dt className="caps text-mute">Priciest hour</dt>
+              <dd className="mt-0.5 font-mono text-lg font-medium tabular text-signal">
+                {hhmm(peak.peakHour)}{" "}
+                <span className="text-sm text-soft">{eur(money.conv(peak.max), money.digits)} {money.label}</span>
+              </dd>
+            </div>
+          </dl>
+
           <div className={`mt-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
             {data.length ? (
               <ResponsiveContainer width="100%" height={260}>
@@ -214,6 +241,15 @@ export default function ZoneDetail({
                       name,
                     ]}
                   />
+                  {cheap && (
+                    <ReferenceArea
+                      x1={cheap.start}
+                      x2={cheap.last}
+                      fill={p.fg}
+                      fillOpacity={0.08}
+                      ifOverflow="hidden"
+                    />
+                  )}
                   <Area name="Outlook 80% range" dataKey="band" stroke="none" fill={color} fillOpacity={0.14} isAnimationActive={false} />
                   <Line name="Actual" dataKey="actual" type="linear" stroke={p.fg} strokeWidth={1.25} dot={false} isAnimationActive={false} />
                   {showBase && (
@@ -232,7 +268,7 @@ export default function ZoneDetail({
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-fg" /> Actual</span>
               <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: color }} /> Model forecast (logged)</span>
               {showBase && <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t border-dashed border-mute" /> Baseline: same hour yesterday</span>}
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Forecast, next {outlookDays(forecast)} · 80% range</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-4" style={{ background: color, opacity: 0.25 }} /> Forecast, next {outlookDays(ahead)} · 80% range</span>
             </div>
           </div>
 

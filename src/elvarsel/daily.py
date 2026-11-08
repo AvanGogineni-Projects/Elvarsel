@@ -50,7 +50,11 @@ def _ingest_zone(zone: str, today: dt.date) -> tuple[list[str], pd.DataFrame | N
         nwp = openmeteo.fetch(zone, today - dt.timedelta(days=2), today + dt.timedelta(days=fc.LEADS[-1] + 1))
         storage.upsert(nwp, "raw_nwp")
     except Exception as e:  # noqa: BLE001
-        errors.append(f"ingest {zone} nwp: {type(e).__name__}: {e}")
+        # A warning, not a failure: each run re-fetches a 5-day window, so the
+        # hours missed here are filled by the next run (tomorrow's were already
+        # fetched by the previous two), and the model tolerates gaps.
+        print(f"WARN ingest {zone} nwp: {type(e).__name__}: {e}", flush=True)
+        nwp = None
     return errors, nwp
 
 
